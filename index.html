@@ -504,9 +504,10 @@
     <label style="display:flex;margin-bottom:10px;">
       <input type="checkbox" id="strict-mode"> Strict matching (must say line correctly)
     </label>
-    <label style="display:flex;margin-bottom:4px;">
-      <input type="checkbox" id="use-piper"> Use Piper TTS (neural voices, ~75MB download)
+    <label style="display:flex;margin-bottom:6px;">
+      <input type="checkbox" id="use-piper"> Use Piper TTS (neural voices — no Swedish accent)
     </label>
+    <div id="piper-status" style="font-size:0.85em;color:var(--text-2);margin-left:25px;"></div>
   </div>
   <button id="start-rehearsal" disabled>Start rehearsing →</button>
   <button id="back-to-edit" class="secondary">← Back</button>
@@ -553,7 +554,8 @@ let characterVoiceMap = {};
 // ============ LocalStorage: Save/Load Plays ============
 const STORAGE_KEY = 'lineup_plays';
 const ACTIVE_KEY = 'lineup_active';
-let characterVoiceAssignments = {}; // { 'CHAR_NAME': voiceIndex }
+let characterVoiceAssignments = {}; // { 'CHAR_NAME': voiceIndex } — system TTS
+let piperVoiceAssignments = {};      // { 'CHAR_NAME': piperVoiceId }
 
 const SAMPLE_PLAY = `ALICE: Good morning, Bob. How are you today?
 BOB: I'm doing great, Alice! The weather is beautiful.
@@ -581,6 +583,7 @@ function savePlay(name, scriptText) {
     name,
     scriptText,
     voiceAssignments: characterVoiceAssignments,
+    piperVoiceAssignments,
     myCharacter,
     date: new Date().toISOString()
   };
@@ -608,12 +611,9 @@ function loadPlay(name) {
   localStorage.setItem(ACTIVE_KEY, name);
   document.getElementById('script-text').value = play.scriptText;
   // Load saved voice assignments if available
-  if (play.voiceAssignments) {
-    characterVoiceAssignments = play.voiceAssignments;
-  }
-  if (play.myCharacter) {
-    myCharacter = play.myCharacter;
-  }
+  if (play.voiceAssignments) characterVoiceAssignments = play.voiceAssignments;
+  if (play.piperVoiceAssignments) piperVoiceAssignments = play.piperVoiceAssignments;
+  if (play.myCharacter) myCharacter = play.myCharacter;
   showStep('step-edit');
 }
 
@@ -959,44 +959,76 @@ function renderCharacterVoiceAssignments() {
     return;
   }
 
-  // Deduplicate voices by name
-  const seen = new Set();
-  const uniqueVoices = voices.filter(v => {
-    const baseName = v.name.replace(/\s*\(.*?\)\s*/g, '').trim();
-    if (seen.has(baseName)) return false;
-    seen.add(baseName);
-    return true;
-  });
-
-  // Filter voices to match the selected script language
-  const langSelect = document.getElementById('lang-select');
-  const [ocrLang, speechLang] = langSelect ? langSelect.value.split('|') : ['eng', 'en-US'];
-  const langPrefix = speechLang.split('-')[0];
-  const isMixed = ocrLang.includes('+');
-  const langFiltered = isMixed ? uniqueVoices : uniqueVoices.filter(v => v.lang.startsWith(langPrefix));
-  const displayVoices = langFiltered.length > 0 ? langFiltered : uniqueVoices;
-
+  const usePiper = document.getElementById('use-piper')?.checked;
   parentDiv.style.display = 'block';
   container.innerHTML = '';
-  others.forEach(c => {
-    const row = document.createElement('div');
-    row.className = 'voice-row';
-    row.innerHTML = `<label>${c}</label>`;
-    const sel = document.createElement('select');
-    sel.id = `voice-for-${c}`;
-    displayVoices.forEach((v, i) => {
-      const opt = document.createElement('option');
-      opt.value = voices.indexOf(v);
-      opt.textContent = `${v.name} (${v.lang})`;
-      if (characterVoiceAssignments[c] === voices.indexOf(v)) opt.selected = true;
-      sel.appendChild(opt);
+
+  if (usePiper) {
+    // Piper mode: show Piper voice dropdowns filtered by script language
+    const langPrefix = getScriptLangPrefix();
+    const availableVoices = getPiperVoicesForLang(langPrefix);
+
+    others.forEach(c => {
+      // Default-assign if not set yet
+      if (!piperVoiceAssignments[c]) piperVoiceAssignments[c] = availableVoices[0]?.id;
+
+      const row = document.createElement('div');
+      row.className = 'voice-row';
+      row.innerHTML = `<label>${c}</label>`;
+      const sel = document.createElement('select');
+      sel.id = `voice-for-${c}`;
+      availableVoices.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v.id;
+        opt.textContent = v.label + (piperDownloaded.has(v.id) ? ' ✓' : '');
+        if (piperVoiceAssignments[c] === v.id) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.onchange = () => {
+        piperVoiceAssignments[c] = sel.value;
+        piperReady = false;
+        initPiper();
+      };
+      row.appendChild(sel);
+      container.appendChild(row);
     });
-    sel.onchange = () => {
-      characterVoiceAssignments[c] = parseInt(sel.value);
-    };
-    row.appendChild(sel);
-    container.appendChild(row);
-  });
+  } else {
+    // System TTS mode: show browser voices filtered by script language
+    const seen = new Set();
+    const uniqueVoices = voices.filter(v => {
+      const baseName = v.name.replace(/\s*\(.*?\)\s*/g, '').trim();
+      if (seen.has(baseName)) return false;
+      seen.add(baseName);
+      return true;
+    });
+
+    const langSelect = document.getElementById('lang-select');
+    const [ocrLang, speechLang] = langSelect ? langSelect.value.split('|') : ['eng', 'en-US'];
+    const langPrefix = speechLang.split('-')[0];
+    const isMixed = ocrLang.includes('+');
+    const langFiltered = isMixed ? uniqueVoices : uniqueVoices.filter(v => v.lang.startsWith(langPrefix));
+    const displayVoices = langFiltered.length > 0 ? langFiltered : uniqueVoices;
+
+    others.forEach(c => {
+      const row = document.createElement('div');
+      row.className = 'voice-row';
+      row.innerHTML = `<label>${c}</label>`;
+      const sel = document.createElement('select');
+      sel.id = `voice-for-${c}`;
+      displayVoices.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = voices.indexOf(v);
+        opt.textContent = `${v.name} (${v.lang})`;
+        if (characterVoiceAssignments[c] === voices.indexOf(v)) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.onchange = () => {
+        characterVoiceAssignments[c] = parseInt(sel.value);
+      };
+      row.appendChild(sel);
+      container.appendChild(row);
+    });
+  }
 }
 
 // ============ Voices ============
@@ -1081,39 +1113,105 @@ if (document.readyState === 'loading') {
 }
 
 // ============ Piper TTS Engine ============
-let piperEngine = null;
+
+const PIPER_VOICES = [
+  { id: 'en_US-hfc_female-medium', label: 'English US – Female', lang: 'en' },
+  { id: 'en_US-joe-medium',         label: 'English US – Male',   lang: 'en' },
+  { id: 'en_GB-alan-medium',        label: 'English GB – Male',   lang: 'en' },
+  { id: 'sv_SE-nst-medium',         label: 'Swedish',             lang: 'sv' },
+  { id: 'de_DE-thorsten-medium',    label: 'German',              lang: 'de' },
+  { id: 'fr_FR-gilles-low',         label: 'French',              lang: 'fr' },
+  { id: 'es_ES-carlfm-x_low',       label: 'Spanish',             lang: 'es' },
+  { id: 'it_IT-riccardo-x_low',     label: 'Italian',             lang: 'it' },
+  { id: 'nb_NO-talesyntese-medium', label: 'Norwegian',           lang: 'nb' },
+  { id: 'da_DK-talesyntese-medium', label: 'Danish',              lang: 'da' },
+  { id: 'fi_FI-harri-low',          label: 'Finnish',             lang: 'fi' },
+];
+
 let piperReady = false;
+const piperDownloaded = new Set();
 
-async function initPiper() {
-  const status = document.getElementById('voice-status');
-  if (status) status.textContent = 'Loading Piper TTS (~75MB)...';
-
-  try {
-    // Check if already cached
-    const stored = await tts.stored();
-    if (!stored.includes('en_US-hfc_female-medium')) {
-      await tts.download('en_US-hfc_female-medium', (progress) => {
-        if (status) status.textContent = `Loading Piper: ${Math.round(progress.loaded * 100 / progress.total)}%`;
-      });
-    }
-    piperReady = true;
-    if (status) status.textContent = '✓ Piper TTS ready';
-  } catch (e) {
-    console.error('Piper init failed:', e);
-    if (status) status.textContent = 'Piper TTS failed - using browser voices';
-  }
+function getScriptLangPrefix() {
+  const langSelect = document.getElementById('lang-select');
+  const speechLang = langSelect ? langSelect.value.split('|')[1] : 'en-US';
+  return speechLang.split('-')[0];
 }
 
-// Initialize Piper when checkbox is checked
+function getPiperVoicesForLang(langPrefix) {
+  const matching = PIPER_VOICES.filter(v => v.lang === langPrefix);
+  return matching.length > 0 ? matching : PIPER_VOICES.filter(v => v.lang === 'en');
+}
+
+function getDefaultPiperVoiceId(langPrefix) {
+  return getPiperVoicesForLang(langPrefix || getScriptLangPrefix())[0]?.id || 'en_US-hfc_female-medium';
+}
+
+async function downloadPiperVoice(voiceId, onProgress) {
+  if (piperDownloaded.has(voiceId)) return;
+  const stored = await tts.stored();
+  if (!stored.includes(voiceId)) {
+    await tts.download(voiceId, onProgress);
+  }
+  piperDownloaded.add(voiceId);
+}
+
+async function initPiper() {
+  if (!document.getElementById('use-piper')?.checked) return;
+  const statusEl = document.getElementById('piper-status');
+
+  const others = characters.filter(c => c !== myCharacter);
+  const neededIds = new Set(
+    others.length > 0
+      ? others.map(c => piperVoiceAssignments[c] || getDefaultPiperVoiceId())
+      : [getDefaultPiperVoiceId()]
+  );
+
+  const toDownload = [...neededIds].filter(id => !piperDownloaded.has(id));
+
+  if (toDownload.length === 0) {
+    piperReady = true;
+    if (statusEl) statusEl.textContent = '✓ Ready';
+    return;
+  }
+
+  for (const id of toDownload) {
+    const voice = PIPER_VOICES.find(v => v.id === id);
+    const label = voice?.label || id;
+    try {
+      await downloadPiperVoice(id, (p) => {
+        const pct = Math.round(p.loaded * 100 / p.total);
+        if (statusEl) statusEl.textContent = `Downloading ${label}: ${pct}%`;
+      });
+    } catch (e) {
+      console.error('Piper download failed:', id, e);
+      if (statusEl) statusEl.textContent = `Download failed for ${label}`;
+      return;
+    }
+  }
+
+  piperReady = true;
+  const count = neededIds.size;
+  if (statusEl) statusEl.textContent = `✓ Ready (${count} voice${count > 1 ? 's' : ''})`;
+}
+
 document.getElementById('use-piper').addEventListener('change', (e) => {
+  piperReady = false;
+  renderCharacterVoiceAssignments();
   if (e.target.checked) {
     initPiper();
+  } else {
+    const statusEl = document.getElementById('piper-status');
+    if (statusEl) statusEl.textContent = '';
   }
 });
 
-// Re-render voice dropdowns when script language changes
+// Re-render voice dropdowns (and re-init Piper if active) when script language changes
 document.getElementById('lang-select').addEventListener('change', () => {
   renderCharacterVoiceAssignments();
+  if (document.getElementById('use-piper')?.checked) {
+    piperReady = false;
+    initPiper();
+  }
 });
 
 function getVoiceForCharacter(char) {
@@ -1359,11 +1457,13 @@ function speakLine(text, character, onDone) {
   const usePiper = document.getElementById('use-piper')?.checked;
 
   if (usePiper && piperReady) {
-    // Use Piper TTS for neural-quality speech
+    const voiceId = character
+      ? (piperVoiceAssignments[character] || getDefaultPiperVoiceId())
+      : getDefaultPiperVoiceId();
     document.getElementById('listening-status').textContent = character ? `🔊 ${character} is speaking...` : '🔊';
     tts.predict({
       text: text,
-      voiceId: 'en_US-hfc_female-medium',
+      voiceId,
     }).then(wavBlob => {
       const audio = new Audio(URL.createObjectURL(wavBlob));
       audio.onended = () => {

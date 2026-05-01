@@ -278,6 +278,9 @@
     <label style="display:block;margin-bottom:10px;">
       <input type="checkbox" id="strict-mode"> Strict matching (must say line correctly)
     </label>
+    <label style="display:block;margin-bottom:10px;">
+      <input type="checkbox" id="use-piper"> Use Piper TTS (neural voices, ~75MB download)
+    </label>
   </div>
   <button id="start-rehearsal" disabled>Start rehearsing →</button>
   <button id="back-to-edit" class="secondary">← Back</button>
@@ -307,6 +310,7 @@
   <div style="height:60px;"></div> <!-- Spacer so content doesn't hide behind controls -->
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1.0.4/dist/piper-tts.js"></script>
 <script>
 // ============ State ============
 let capturedImages = [];  // data URLs
@@ -849,6 +853,37 @@ if (document.readyState === 'loading') {
   speechSynthesis.getVoices();
 }
 
+// ============ Piper TTS Engine ============
+let piperEngine = null;
+let piperReady = false;
+
+async function initPiper() {
+  const status = document.getElementById('voice-status');
+  if (status) status.textContent = 'Loading Piper TTS (~75MB)...';
+
+  try {
+    // Check if already cached
+    const stored = await tts.stored();
+    if (!stored.includes('en_US-hfc_female-medium')) {
+      await tts.download('en_US-hfc_female-medium', (progress) => {
+        if (status) status.textContent = `Loading Piper: ${Math.round(progress.loaded * 100 / progress.total)}%`;
+      });
+    }
+    piperReady = true;
+    if (status) status.textContent = '✓ Piper TTS ready';
+  } catch (e) {
+    console.error('Piper init failed:', e);
+    if (status) status.textContent = 'Piper TTS failed - using browser voices';
+  }
+}
+
+// Initialize Piper when checkbox is checked
+document.getElementById('use-piper').addEventListener('change', (e) => {
+  if (e.target.checked) {
+    initPiper();
+  }
+});
+
 function getVoiceForCharacter(char) {
   // Use saved voice assignment if available
   if (characterVoiceAssignments[char] !== undefined) {
@@ -1104,6 +1139,35 @@ function advanceLine() {
 }
 
 function speakLine(text, character, onDone) {
+  const usePiper = document.getElementById('use-piper')?.checked;
+
+  if (usePiper && piperReady) {
+    // Use Piper TTS for neural-quality speech
+    document.getElementById('listening-status').textContent = character ? `🔊 ${character} is speaking...` : '🔊';
+    tts.predict({
+      text: text,
+      voiceId: 'en_US-hfc_female-medium',
+    }).then(wavBlob => {
+      const audio = new Audio(URL.createObjectURL(wavBlob));
+      audio.onended = () => {
+        document.getElementById('listening-status').textContent = '';
+        URL.revokeObjectURL(audio.src);
+        if (onDone) onDone();
+      };
+      audio.onerror = () => {
+        document.getElementById('listening-status').textContent = '⚠️ Audio error';
+        if (onDone) onDone();
+      };
+      audio.play();
+    }).catch(e => {
+      console.error('Piper error:', e);
+      document.getElementById('listening-status').textContent = '⚠️ Piper error';
+      if (onDone) onDone();
+    });
+    return;
+  }
+
+  // Fallback to browser SpeechSynthesis
   document.getElementById('listening-status').textContent = character ? `🔊 ${character} is speaking...` : '🔊';
   const utter = new SpeechSynthesisUtterance(text);
   if (character) {
@@ -1123,7 +1187,6 @@ function speakLine(text, character, onDone) {
     if (onDone) onDone();
   };
   speechSynthesis.cancel();
-  // Small delay to ensure cancel completes
   setTimeout(() => {
     speechSynthesis.speak(utter);
   }, 50);

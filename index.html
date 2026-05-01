@@ -265,7 +265,8 @@
   <div class="controls-row" style="margin-top: 16px;">
     <label>Voice for others:
       <select id="voice-select"></select>
-      <button class="secondary" onclick="loadVoices()" style="margin-left:8px;padding:5px 10px;font-size:0.9em;">Load Voices</button>
+      <button class="secondary" onclick="forceLoadVoices()" style="margin-left:8px;padding:5px 10px;font-size:0.9em;">Load Voices</button>
+      <span id="voice-status" style="margin-left:10px;font-size:0.9em;color:#666;"></span>
     </label>
     <label>
       <input type="checkbox" id="strict-mode"> Strict matching (must say line correctly)
@@ -679,10 +680,13 @@ function renderCharacterList() {
 function populateVoices() {
   voices = speechSynthesis.getVoices();
   const select = document.getElementById('voice-select');
+  const status = document.getElementById('voice-status');
   if (!select) return;
   select.innerHTML = '';
+  if (status) status.textContent = `Found ${voices.length} voices`;
+
   if (voices.length === 0) {
-    select.innerHTML = '<option value="">No voices found - try clicking "Load Voices" button</option>';
+    select.innerHTML = '<option value="">No voices found - try "Load Voices" button</option>';
     return;
   }
   const sorted = [...voices].sort((a, b) => {
@@ -698,16 +702,45 @@ function populateVoices() {
   });
 }
 
-// Load voices - Chrome needs this triggered
-function loadVoices() {
-  populateVoices();
-  if (voices.length === 0 && speechSynthesis.onvoiceschanged !== undefined) {
-    speechSynthesis.onvoiceschanged = populateVoices;
-    speechSynthesis.getVoices(); // Trigger the event
-  }
+// Force Chrome to load voices by speaking silently
+function forceLoadVoices() {
+  const status = document.getElementById('voice-status');
+  if (status) status.textContent = 'Loading voices...';
+
+  // Chrome requires a speech attempt to load voices
+  const utter = new SpeechSynthesisUtterance(' ');
+  utter.volume = 0;
+  utter.onend = () => {
+    populateVoices();
+    if (voices.length === 0) {
+      // Try again with onvoiceschanged
+      if (speechSynthesis.onvoiceschanged !== undefined) {
+        speechSynthesis.onvoiceschanged = () => {
+          populateVoices();
+        };
+      }
+      speechSynthesis.getVoices();
+    }
+  };
+  utter.onerror = () => {
+    populateVoices();
+  };
+  speechSynthesis.speak(utter);
 }
 
 // Load voices on DOM ready
+function loadVoices() {
+  populateVoices();
+  if (voices.length === 0) {
+    // Set up the event listener for async loading
+    if (speechSynthesis.onvoiceschanged !== undefined) {
+      speechSynthesis.onvoiceschanged = populateVoices;
+    }
+    // Try to get voices
+    speechSynthesis.getVoices();
+  }
+}
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', loadVoices);
 } else {

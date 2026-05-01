@@ -278,9 +278,6 @@
     <label style="display:block;margin-bottom:10px;">
       <input type="checkbox" id="strict-mode"> Strict matching (must say line correctly)
     </label>
-    <label style="display:block;margin-bottom:10px;">
-      <input type="checkbox" id="text-mode"> Text input mode (for mobile without speech recognition)
-    </label>
   </div>
   <button id="start-rehearsal" disabled>Start rehearsing →</button>
   <button id="back-to-edit" class="secondary">← Back</button>
@@ -884,12 +881,16 @@ function requestMicPermission() {
 function setupRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) {
-    alert('Speech recognition not supported in this browser. Try Chrome or Edge. You can still use the Skip button to advance.');
     return null;
   }
   const r = new SR();
-  r.continuous = true;
+
+  // Chrome Android does NOT support continuous:true (chromium bug #41297427)
+  // Detect Chrome Android and force continuous=false
+  const isChromeAndroid = /Chrome/.test(navigator.userAgent) && /Android/.test(navigator.userAgent);
+  r.continuous = isChromeAndroid ? false : true;
   r.interimResults = true;
+
   const langSelect = document.getElementById('lang-select');
   r.lang = langSelect ? langSelect.value.split('|')[1] : 'en-US';
 
@@ -910,15 +911,22 @@ function setupRecognition() {
     if (e.error === 'no-speech' || e.error === 'aborted') {
       // benign — recognition will auto-restart via onend
     } else if (e.error === 'not-allowed') {
-      alert('Microphone permission denied. Please allow microphone access and reload.');
+      alert('Microphone permission denied. Please allow microphone access in Settings > Safari > Microphone (iOS) or browser settings.');
       recognitionActive = false;
+    } else if (e.error === 'language-not-supported') {
+      console.warn('Language not supported for speech recognition');
     }
   };
 
   r.onend = () => {
     // Auto-restart so we keep listening across the whole rehearsal
+    // For Chrome Android (continuous:false), we need to manually restart
     if (recognitionActive) {
-      try { r.start(); } catch(e) { /* already started */ }
+      setTimeout(() => {
+        if (recognitionActive) {
+          try { r.start(); } catch(e) { /* already started */ }
+        }
+      }, 100);
     }
   };
 
@@ -956,14 +964,20 @@ document.getElementById('start-rehearsal').addEventListener('click', () => {
   // Reload voices in case they weren't ready before
   voices = speechSynthesis.getVoices();
 
-  // Check if text mode is enabled
+  // Check if text mode is enabled (only as last resort)
   const textMode = document.getElementById('text-mode')?.checked;
-  const noMicFallback = document.getElementById('no-mic-fallback');
 
-  if (textMode || !recognition) {
-    // Use text input mode (mobile or user choice)
+  if (textMode) {
+    // User explicitly chose text mode
+    const noMicFallback = document.getElementById('no-mic-fallback');
     if (noMicFallback) noMicFallback.style.display = 'block';
-    advanceLine(); // Start without speech recognition
+    advanceLine();
+  } else if (!recognition && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    // Speech recognition not available - show message but still try to advance
+    console.warn('Speech recognition not available on this browser/device');
+    const status = document.getElementById('listening-status');
+    if (status) status.textContent = '⚠️ Speech recognition not available - use Skip button';
+    advanceLine();
   } else if (!micPermissionGranted && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     // Show mic permission button for iOS
     const micDiv = document.getElementById('mic-permission');

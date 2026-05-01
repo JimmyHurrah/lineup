@@ -6,173 +6,395 @@
 <title>LineUp — Rehearsal Partner</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
+  :root {
+    --bg:           #0e0e16;
+    --surface:      #16161f;
+    --surface-2:    #1e1e2c;
+    --surface-3:    #252538;
+    --border:       #2a2a3e;
+    --accent:       #7c6af7;
+    --accent-hover: #9180ff;
+    --accent-dim:   rgba(124,106,247,0.13);
+    --green:        #4ade80;
+    --green-dim:    rgba(74,222,128,0.11);
+    --text:         #e8e8f2;
+    --text-2:       #7070a0;
+    --red:          #f87171;
+    --red-dim:      rgba(248,113,113,0.13);
+    --yellow:       #fbbf24;
+    --yellow-dim:   rgba(251,191,36,0.10);
+  }
+
   * { box-sizing: border-box; }
+
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    margin: 0;
-    padding: 20px;
-    background: #f5f5f7;
-    color: #1d1d1f;
-    max-width: 900px;
     margin: 0 auto;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--text);
+    max-width: 720px;
+    min-height: 100vh;
   }
-  h1 { font-size: 1.8em; margin-bottom: 0.2em; }
-  .subtitle { color: #6e6e73; margin-bottom: 2em; }
+
+  h1 {
+    font-size: 1.8em;
+    margin-bottom: 0.15em;
+    background: linear-gradient(130deg, #fff 0%, var(--accent) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle { color: var(--text-2); margin-bottom: 1.5em; font-size: 0.95em; }
+
   .step {
-    background: white;
-    border-radius: 12px;
+    background: var(--surface);
+    border-radius: 16px;
     padding: 20px;
-    margin-bottom: 20px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    margin-bottom: 14px;
+    border: 1px solid var(--border);
   }
-  .step h2 { margin-top: 0; font-size: 1.2em; }
+
+  .step h2 { margin-top: 0; font-size: 1.05em; color: var(--text-2); letter-spacing: 0.3px; }
+
+  /* ── Buttons ── */
   button {
-    background: #0071e3;
-    color: white;
+    background: var(--accent);
+    color: #fff;
     border: none;
-    padding: 10px 18px;
-    border-radius: 8px;
-    font-size: 1em;
+    padding: 11px 20px;
+    border-radius: 10px;
+    font-size: 0.95em;
+    font-weight: 500;
     cursor: pointer;
     margin-right: 8px;
     margin-top: 8px;
+    min-height: 44px;
+    transition: background 0.15s, transform 0.1s;
+    -webkit-tap-highlight-color: transparent;
   }
-  button:hover { background: #0077ed; }
-  button:disabled { background: #c7c7cc; cursor: not-allowed; }
-  button.secondary { background: #e5e5ea; color: #1d1d1f; }
-  button.secondary:hover { background: #d1d1d6; }
-  button.danger { background: #ff3b30; }
-  #video, #canvas { width: 100%; max-width: 600px; border-radius: 8px; background: #000; }
-  #canvas { display: none; }
-  .preview-img { max-width: 100%; border-radius: 8px; margin-top: 10px; }
-  .progress { margin-top: 10px; color: #6e6e73; font-size: 0.9em; }
-  .script-editor {
+  button:hover  { background: var(--accent-hover); }
+  button:active { transform: scale(0.97); }
+  button:disabled { background: var(--surface-3); color: var(--text-2); cursor: not-allowed; }
+
+  button.secondary {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  button.secondary:hover { background: var(--surface-3); }
+
+  button.danger {
+    background: var(--red-dim);
+    color: var(--red);
+    border: 1px solid rgba(248,113,113,0.22);
+  }
+  button.danger:hover { background: rgba(248,113,113,0.22); }
+
+  /* ── Form elements ── */
+  input[type="text"],
+  input[type="url"],
+  textarea,
+  select {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 0.95em;
+    font-family: inherit;
     width: 100%;
-    min-height: 300px;
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-size: 14px;
-    padding: 12px;
-    border: 1px solid #d2d2d7;
-    border-radius: 8px;
-    resize: vertical;
+    transition: border-color 0.15s;
+    -webkit-appearance: none;
   }
-  .character-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 10px;
+  input[type="text"]:focus,
+  input[type="url"]:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+    border-color: var(--accent);
   }
-  .character-chip {
-    padding: 6px 14px;
-    background: #e5e5ea;
-    border-radius: 20px;
+  input[type="file"] {
+    color: var(--text-2);
+    font-size: 0.9em;
+  }
+  select { width: auto; cursor: pointer; }
+
+  input[type="checkbox"] {
+    width: 17px;
+    height: 17px;
+    accent-color: var(--accent);
     cursor: pointer;
-    border: 2px solid transparent;
+    flex-shrink: 0;
   }
-  .character-chip.selected {
-    background: #0071e3;
-    color: white;
-    border-color: #0071e3;
-  }
-  .rehearsal-line {
-    padding: 12px 16px;
-    margin: 8px 0;
-    border-radius: 8px;
-    border-left: 4px solid #d2d2d7;
-    background: #fafafa;
-    transition: all 0.2s;
-  }
-  .rehearsal-line.current {
-    border-left-color: #0071e3;
-    background: #f0f7ff;
-  }
-  .rehearsal-line.mine {
-    border-left-color: #34c759;
-  }
-  .rehearsal-line.mine.current {
-    background: #f0fff4;
-    border-left-color: #34c759;
-  }
-  .rehearsal-line.done {
-    opacity: 0.5;
-  }
-  .character-name {
-    font-weight: 600;
-    font-size: 0.85em;
-    text-transform: uppercase;
-    color: #6e6e73;
-    letter-spacing: 0.5px;
-  }
-  .line-text { margin-top: 4px; }
-  .stage-direction {
-    font-style: italic;
-    color: #6e6e73;
-    padding: 8px 16px;
-    margin: 8px 0;
-  }
-  .listening-indicator {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: #ff3b30;
-    margin-left: 8px;
-    animation: pulse 1s infinite;
-  }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-  }
-  .heard-text {
-    font-size: 0.85em;
-    color: #6e6e73;
-    margin-top: 6px;
-    font-style: italic;
-  }
-  .controls-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-  }
+
   label {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    margin-right: 16px;
+    gap: 8px;
+    font-size: 0.95em;
+    cursor: pointer;
+    color: var(--text);
+  }
+
+  /* ── Video ── */
+  #video, #canvas { width: 100%; border-radius: 12px; background: #000; display: block; }
+  #canvas { display: none; }
+
+  .preview-img { max-width: 100%; border-radius: 10px; margin-top: 10px; }
+  .progress { margin-top: 10px; color: var(--text-2); font-size: 0.9em; }
+
+  /* ── Script editor ── */
+  .script-editor {
+    width: 100%;
+    min-height: 280px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    resize: vertical;
+  }
+
+  /* ── Help text ── */
+  .help-text {
+    font-size: 0.88em;
+    color: var(--text-2);
+    margin-top: 8px;
+    line-height: 1.5;
+  }
+  .help-text code {
+    background: var(--surface-3);
+    padding: 1px 5px;
+    border-radius: 4px;
     font-size: 0.95em;
   }
-  select {
-    padding: 6px 10px;
-    border-radius: 6px;
-    border: 1px solid #d2d2d7;
-    background: white;
-  }
-  .hidden { display: none !important; }
-  .help-text {
-    font-size: 0.9em;
-    color: #6e6e73;
-    margin-top: 8px;
-  }
+
+  /* ── Tabs ── */
   .tab-buttons {
     display: flex;
-    gap: 4px;
-    margin-bottom: 12px;
-    border-bottom: 1px solid #d2d2d7;
+    gap: 2px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
+  .tab-buttons::-webkit-scrollbar { display: none; }
+
   .tab-button {
     background: transparent;
-    color: #6e6e73;
+    color: var(--text-2);
     border: none;
     border-bottom: 2px solid transparent;
     border-radius: 0;
     margin: 0;
-    padding: 8px 16px;
+    margin-bottom: -1px;
+    padding: 8px 14px;
+    font-size: 0.88em;
+    white-space: nowrap;
+    min-height: 40px;
+    font-weight: 400;
   }
-  .tab-button.active {
-    color: #0071e3;
-    border-bottom-color: #0071e3;
+  .tab-button:hover    { background: var(--surface-2); transform: none; }
+  .tab-button.active   { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ── Character chips ── */
+  .character-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+  .character-chip {
+    padding: 8px 18px;
+    background: var(--surface-2);
+    border-radius: 22px;
+    cursor: pointer;
+    border: 2px solid var(--border);
+    color: var(--text);
+    font-size: 0.95em;
+    font-weight: 500;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    transition: border-color 0.15s, color 0.15s;
+    -webkit-tap-highlight-color: transparent;
   }
+  .character-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .character-chip.selected {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  /* ── Rehearsal lines ── */
+  .rehearsal-line {
+    padding: 12px 16px;
+    margin: 6px 0;
+    border-radius: 10px;
+    border-left: 3px solid var(--border);
+    background: var(--surface-2);
+    transition: background 0.2s, border-color 0.2s;
+  }
+  .rehearsal-line.current    { border-left-color: var(--accent); background: var(--accent-dim); }
+  .rehearsal-line.mine       { border-left-color: var(--green); }
+  .rehearsal-line.mine.current { background: var(--green-dim); border-left-color: var(--green); }
+  .rehearsal-line.done       { opacity: 0.32; }
+
+  .character-name {
+    font-weight: 600;
+    font-size: 0.75em;
+    text-transform: uppercase;
+    color: var(--text-2);
+    letter-spacing: 0.9px;
+  }
+  .line-text { margin-top: 4px; line-height: 1.5; }
+
+  .stage-direction {
+    font-style: italic;
+    color: var(--text-2);
+    padding: 6px 16px;
+    margin: 6px 0;
+    font-size: 0.9em;
+  }
+
+  /* ── Listening indicator ── */
+  .listening-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--red);
+    margin-left: 8px;
+    animation: pulse 1.2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(248,113,113,0.5); }
+    50%       { opacity: 0.7; box-shadow: 0 0 0 5px rgba(248,113,113,0); }
+  }
+
+  .heard-text {
+    font-size: 0.82em;
+    color: var(--text-2);
+    margin-top: 6px;
+    font-style: italic;
+  }
+
+  /* ── Controls row ── */
+  .controls-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+
+  /* ── Alert panels ── */
+  .alert {
+    padding: 12px 16px;
+    border-radius: 10px;
+    margin-bottom: 12px;
+    font-size: 0.9em;
+    line-height: 1.5;
+  }
+  .alert p { margin: 5px 0 0; font-size: 0.95em; }
+  .alert-warning {
+    background: var(--yellow-dim);
+    border: 1px solid rgba(251,191,36,0.22);
+    color: var(--yellow);
+  }
+  .alert-info {
+    background: var(--accent-dim);
+    border: 1px solid rgba(124,106,247,0.22);
+    color: var(--text);
+  }
+
+  /* ── Saved plays ── */
+  .saved-play {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    margin: 6px 0;
+    background: var(--surface-2);
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    gap: 10px;
+  }
+  .saved-play-meta { min-width: 0; }
+  .saved-play-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .saved-play-date { font-size: 0.8em; color: var(--text-2); margin-top: 2px; }
+  .saved-play-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .saved-play-actions button { margin: 0; }
+
+  /* ── Voice assignment rows ── */
+  .voice-row {
+    display: flex;
+    align-items: center;
+    margin: 8px 0;
+    gap: 12px;
+  }
+  .voice-row label { min-width: 110px; flex-shrink: 0; font-size: 0.9em; cursor: default; }
+  .voice-row select { flex: 1; font-size: 0.88em; }
+
+  /* ── Captured image thumbnails ── */
+  .thumb-wrap { display: inline-block; margin: 4px; position: relative; vertical-align: top; }
+  .thumb-img  { max-width: 100px; border-radius: 6px; border: 1px solid var(--border); display: block; }
+  .thumb-del  {
+    position: absolute; top: -6px; right: -6px;
+    width: 22px; height: 22px; min-height: unset;
+    padding: 0; margin: 0;
+    background: var(--red); color: #fff;
+    border-radius: 50%; font-size: 13px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    border: none;
+  }
+
+  /* ── Rehearse controls bar ── */
+  .rehearse-controls {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: rgba(14,14,22,0.92);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    padding: 10px 16px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+    z-index: 1000;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+  }
+  .rehearse-controls button { margin: 0; }
+  .rehearse-spacer { height: 80px; }
+
+  /* ── Saved-plays form row ── */
+  .save-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 10px;
+  }
+  .save-row input { flex: 1; min-width: 140px; }
+  .save-row button { margin: 0; white-space: nowrap; }
+
+  /* ── Voice/speech init panel ── */
+  .speech-init-panel {
+    background: var(--yellow-dim);
+    border: 1px solid rgba(251,191,36,0.2);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+    color: var(--yellow);
+  }
+  .speech-init-panel p { margin: 4px 0 0; font-size: 0.9em; color: var(--text-2); }
+
+  /* ── URL input row ── */
+  .url-row { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 10px; }
+  .url-row input { flex: 1; }
+  .url-row button { margin: 0; flex-shrink: 0; }
+
+  @media (max-width: 480px) {
+    body    { padding: 10px; }
+    .step   { padding: 14px; border-radius: 12px; }
+    h1      { font-size: 1.45em; }
+    button  { font-size: 0.88em; padding: 10px 15px; }
+    .tab-button { padding: 7px 10px; }
+    .rehearse-controls button { font-size: 0.85em; padding: 9px 13px; }
+  }
+
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
@@ -185,10 +407,12 @@
   <h2>1. Load your script</h2>
 
   <div id="saved-plays" style="margin-bottom:20px;">
-    <h3 style="font-size:1em;margin-bottom:8px;">Saved Plays</h3>
+    <h3 style="font-size:0.95em;margin:0 0 8px;color:var(--text-2);letter-spacing:0.3px;">Saved Plays</h3>
     <div id="saved-plays-list"></div>
-    <input type="text" id="play-name" placeholder="Play name (for saving)" style="padding:8px;border-radius:8px;border:1px solid #ccc;width:200px;">
-    <button id="save-current-play" class="secondary" style="font-size:0.9em;">💾 Save current script</button>
+    <div class="save-row">
+      <input type="text" id="play-name" placeholder="Play name…">
+      <button id="save-current-play" class="secondary">💾 Save script</button>
+    </div>
   </div>
 
   <div style="margin-bottom: 12px;">
@@ -239,8 +463,10 @@
   </div>
 
   <div id="tab-url" class="tab-content hidden">
-    <input type="url" id="url-input" placeholder="https://example.com/script-image.jpg or document URL" style="width:100%;padding:10px;margin-bottom:10px;border-radius:8px;border:1px solid #ccc;">
-    <button id="fetch-url">Fetch & extract text</button>
+    <div class="url-row">
+      <input type="url" id="url-input" placeholder="https://example.com/script-image.jpg or document URL">
+      <button id="fetch-url">Fetch & extract text</button>
+    </div>
     <div id="url-preview"></div>
     <p class="help-text">Enter a URL to an image (PNG/JPG) or a text document (TXT/PDF). Images will use OCR; text files will be loaded directly.</p>
   </div>
@@ -264,21 +490,21 @@
   <div class="character-list" id="character-list"></div>
 
   <div id="voice-assignments" style="margin-top:20px;display:none;">
-    <h3 style="font-size:1em;">Voice assignments for other characters:</h3>
+    <h3 style="font-size:0.95em;margin:0 0 8px;color:var(--text-2);">Voice assignments:</h3>
     <div id="character-voices"></div>
   </div>
 
-  <div class="controls-row" style="margin-top: 16px;">
-    <div id="speech-init" style="margin-bottom:10px;padding:10px;background:#fff3cd;border-radius:8px;display:none;">
+  <div style="margin-top:16px;">
+    <div id="speech-init" class="speech-init-panel hidden">
       <strong>⚠️ Speech initialization needed</strong>
-      <p style="margin:5px 0;font-size:0.9em;">Click the button below to enable speech features (required in Chrome/Edge)</p>
-      <button onclick="initSpeech()" style="padding:8px 16px;">🎤 Initialize Speech Engine</button>
-      <span id="voice-status" style="margin-left:10px;font-size:0.9em;"></span>
+      <p>Click below to enable speech features (required in Chrome/Edge)</p>
+      <button onclick="initSpeech()" style="margin-top:8px;">🎤 Initialize Speech Engine</button>
+      <span id="voice-status" style="margin-left:10px;font-size:0.85em;color:var(--text-2);"></span>
     </div>
-    <label style="display:block;margin-bottom:10px;">
+    <label style="display:flex;margin-bottom:10px;">
       <input type="checkbox" id="strict-mode"> Strict matching (must say line correctly)
     </label>
-    <label style="display:block;margin-bottom:10px;">
+    <label style="display:flex;margin-bottom:4px;">
       <input type="checkbox" id="use-piper"> Use Piper TTS (neural voices, ~75MB download)
     </label>
   </div>
@@ -289,25 +515,27 @@
 <!-- STEP 4: Rehearse -->
 <div class="step hidden" id="step-rehearse">
   <h2>4. Rehearsal <span id="listening-status"></span></h2>
-  <div id="mic-permission" style="display:none;padding:10px;margin-bottom:10px;background:#fff3cd;border-radius:8px;">
+  <div id="mic-permission" class="alert alert-warning hidden">
     <strong>🎤 Microphone access needed</strong>
-    <p style="margin:5px 0;font-size:0.9em;">Tap the button below to enable speech recognition</p>
-    <button onclick="requestMicPermission()" style="padding:8px 16px;">Enable Microphone</button>
+    <p>Tap the button below to enable speech recognition</p>
+    <button onclick="requestMicPermission()" style="margin-top:8px;">Enable Microphone</button>
   </div>
-  <div id="no-mic-fallback" style="display:none;padding:10px;margin-bottom:10px;background:#e7f3ff;border-radius:8px;">
+  <div id="no-mic-fallback" class="alert alert-info hidden">
     <strong>📱 Speech recognition not available</strong>
-    <p style="margin:5px 0;font-size:0.9em;">Type your lines instead:</p>
-    <input type="text" id="text-input" placeholder="Type your line here..." style="width:80%;padding:8px;border-radius:8px;border:1px solid #ccc;" onkeydown="if(event.key==='Enter')submitTextLine()">
-    <button onclick="submitTextLine()" style="padding:8px 16px;margin-left:5px;">Submit</button>
+    <p>Type your lines instead:</p>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <input type="text" id="text-input" placeholder="Type your line here…" onkeydown="if(event.key==='Enter')submitTextLine()">
+      <button onclick="submitTextLine()" style="margin:0;flex-shrink:0;">Submit</button>
+    </div>
   </div>
   <div id="script-display"></div>
-  <div id="rehearse-controls" style="position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,0.95);padding:12px;text-align:center;border-top:1px solid #e0e0e0;z-index:1000;box-shadow:0 -2px 10px rgba(0,0,0,0.1);">
+  <div id="rehearse-controls" class="rehearse-controls">
     <button id="next-line">Skip / Next</button>
     <button id="repeat-line" class="secondary">Repeat last line</button>
-    <button id="restart" class="secondary">Restart from top</button>
+    <button id="restart" class="secondary">Restart</button>
     <button id="exit-rehearsal" class="danger">Exit</button>
   </div>
-  <div style="height:60px;"></div> <!-- Spacer so content doesn't hide behind controls -->
+  <div class="rehearse-spacer"></div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1.0.4/dist/piper-tts.js"></script>
@@ -397,14 +625,14 @@ function renderSavedPlays() {
     return;
   }
   container.innerHTML = plays.map(p => `
-    <div class="saved-play" style="display:flex;justify-content:space-between;align-items:center;padding:10px;margin:5px 0;background:#f9f9f9;border-radius:8px;">
-      <div>
-        <strong>${escapeHtml(p.name)}</strong>
-        <span class="help-text" style="margin-left:10px;">${new Date(p.date).toLocaleDateString()}</span>
+    <div class="saved-play">
+      <div class="saved-play-meta">
+        <div class="saved-play-name">${escapeHtml(p.name)}</div>
+        <div class="saved-play-date">${new Date(p.date).toLocaleDateString()}</div>
       </div>
-      <div>
-        <button onclick="loadPlay('${escapeHtml(p.name)}')" style="padding:5px 10px;font-size:0.9em;">Load</button>
-        <button onclick="deletePlay('${escapeHtml(p.name)}')" class="danger" style="padding:5px 10px;font-size:0.9em;margin-left:5px;">Delete</button>
+      <div class="saved-play-actions">
+        <button onclick="loadPlay('${escapeHtml(p.name)}')" style="padding:7px 14px;font-size:0.88em;">Load</button>
+        <button onclick="deletePlay('${escapeHtml(p.name)}')" class="danger" style="padding:7px 14px;font-size:0.88em;">Delete</button>
       </div>
     </div>
   `).join('');
@@ -465,22 +693,13 @@ function renderCapturedPages() {
   container.innerHTML = '<p class="help-text">Captured ' + capturedImages.length + ' page(s):</p>';
   capturedImages.forEach((src, i) => {
     const wrap = document.createElement('div');
-    wrap.style.display = 'inline-block';
-    wrap.style.margin = '4px';
-    wrap.style.position = 'relative';
+    wrap.className = 'thumb-wrap';
     const img = document.createElement('img');
     img.src = src;
-    img.style.maxWidth = '120px';
-    img.style.borderRadius = '4px';
-    img.style.border = '1px solid #d2d2d7';
+    img.className = 'thumb-img';
     const del = document.createElement('button');
     del.textContent = '×';
-    del.style.position = 'absolute';
-    del.style.top = '0';
-    del.style.right = '0';
-    del.style.padding = '2px 8px';
-    del.style.margin = '0';
-    del.style.background = '#ff3b30';
+    del.className = 'thumb-del';
     del.onclick = () => {
       capturedImages.splice(i, 1);
       renderCapturedPages();
@@ -749,15 +968,23 @@ function renderCharacterVoiceAssignments() {
     return true;
   });
 
+  // Filter voices to match the selected script language
+  const langSelect = document.getElementById('lang-select');
+  const [ocrLang, speechLang] = langSelect ? langSelect.value.split('|') : ['eng', 'en-US'];
+  const langPrefix = speechLang.split('-')[0];
+  const isMixed = ocrLang.includes('+');
+  const langFiltered = isMixed ? uniqueVoices : uniqueVoices.filter(v => v.lang.startsWith(langPrefix));
+  const displayVoices = langFiltered.length > 0 ? langFiltered : uniqueVoices;
+
   parentDiv.style.display = 'block';
   container.innerHTML = '';
   others.forEach(c => {
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;margin:8px 0;gap:10px;';
-    row.innerHTML = `<label style="min-width:120px;">${c}:</label>`;
+    row.className = 'voice-row';
+    row.innerHTML = `<label>${c}</label>`;
     const sel = document.createElement('select');
     sel.id = `voice-for-${c}`;
-    uniqueVoices.forEach((v, i) => {
+    displayVoices.forEach((v, i) => {
       const opt = document.createElement('option');
       opt.value = voices.indexOf(v);
       opt.textContent = `${v.name} (${v.lang})`;
@@ -884,6 +1111,11 @@ document.getElementById('use-piper').addEventListener('change', (e) => {
   }
 });
 
+// Re-render voice dropdowns when script language changes
+document.getElementById('lang-select').addEventListener('change', () => {
+  renderCharacterVoiceAssignments();
+});
+
 function getVoiceForCharacter(char) {
   // Use saved voice assignment if available
   if (characterVoiceAssignments[char] !== undefined) {
@@ -895,13 +1127,13 @@ function getVoiceForCharacter(char) {
   }
   // Fallback: assign a voice per character so they sound different
   if (characterVoiceMap[char]) return characterVoiceMap[char];
-  const baseIdx = 0;
-  const baseVoice = voices[baseIdx];
-  const lang = baseVoice ? baseVoice.lang : 'en-US';
-  const sameLang = voices.filter(v => v.lang === lang);
+  const langSel = document.getElementById('lang-select');
+  const speechLang = langSel ? langSel.value.split('|')[1] : 'en-US';
+  const langPrefix = speechLang.split('-')[0];
+  const sameLang = voices.filter(v => v.lang.startsWith(langPrefix));
   const others = characters.filter(c => c !== myCharacter);
   const idx = others.indexOf(char);
-  const voice = sameLang[idx % sameLang.length] || baseVoice;
+  const voice = sameLang[idx % sameLang.length] || voices[0];
   characterVoiceMap[char] = voice;
   return voice;
 }
@@ -915,31 +1147,16 @@ function requestMicPermission() {
   const micDiv = document.getElementById('mic-permission');
   const status = document.getElementById('listening-status');
 
-  if (status) status.textContent = 'Requesting mic access...';
-
-  // On iOS, we need getUserMedia to trigger microphone permission
-  // On Android Chrome, speech recognition has its own permission flow
-  if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then(() => {
-        micPermissionGranted = true;
-        if (micDiv) micDiv.style.display = 'none';
-        if (status) status.textContent = '✓ Mic ready';
-        recognition = setupRecognition();
-        startContinuousListening();
-      })
-      .catch((err) => {
-        if (status) status.textContent = 'Mic access denied';
-        alert('Microphone access is needed. Please enable it in Settings > Safari > Microphone.');
-      });
-  } else {
-    // Android Chrome: just start recognition and let it trigger its own permission
-    micPermissionGranted = true;
-    if (micDiv) micDiv.style.display = 'none';
-    if (status) status.textContent = '✓ Starting...';
-    recognition = setupRecognition();
-    startContinuousListening();
-  }
+  // Let the speech recognition API trigger its own mic permission dialog.
+  // Calling getUserMedia first and then recognition.start() from a Promise
+  // callback breaks iOS Safari — it requires start() to be called synchronously
+  // from the user gesture that triggered this function.
+  micPermissionGranted = true;
+  if (micDiv) micDiv.classList.add('hidden');
+  if (status) status.textContent = '✓ Starting...';
+  recognition = setupRecognition();
+  startContinuousListening();
+  advanceLine();
 }
 
 function setupRecognition() {
@@ -1035,7 +1252,7 @@ document.getElementById('start-rehearsal').addEventListener('click', () => {
   if (textMode) {
     // User explicitly chose text mode
     const noMicFallback = document.getElementById('no-mic-fallback');
-    if (noMicFallback) noMicFallback.style.display = 'block';
+    if (noMicFallback) noMicFallback.classList.remove('hidden');
     advanceLine();
   } else if (!SR) {
     // Speech recognition API not available at all
@@ -1046,7 +1263,7 @@ document.getElementById('start-rehearsal').addEventListener('click', () => {
   } else if (!micPermissionGranted && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     // Show mic permission button for iOS/Android - must start recognition from user gesture
     const micDiv = document.getElementById('mic-permission');
-    if (micDiv) micDiv.style.display = 'block';
+    if (micDiv) micDiv.classList.remove('hidden');
     if (micDiv) micDiv.querySelector('button').onclick = () => {
       requestMicPermission();
       // Don't advance line until mic is ready

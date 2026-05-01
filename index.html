@@ -560,6 +560,7 @@ let characterVoiceAssignments = {}; // { 'CHAR_NAME': voiceIndex } — system TT
 let piperVoiceAssignments = {};      // { 'CHAR_NAME': piperVoiceKey }
 let piperLib = null;
 const piperCache = new Map();        // lineIdx -> Promise<Blob> (prefetch cache)
+let piperPrepareDone = Promise.resolve(); // resolves when all lines are pre-generated
 async function getPiperLib() {
   if (!piperLib) {
     piperLib = await import('https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1.0.4/dist/piper-tts-web.js');
@@ -1275,10 +1276,9 @@ function requestMicPermission() {
   // from the user gesture that triggered this function.
   micPermissionGranted = true;
   if (micDiv) micDiv.classList.add('hidden');
-  if (status) status.textContent = '✓ Starting...';
   recognition = setupRecognition();
   startContinuousListening();
-  advanceLine();
+  piperPrepareDone.then(() => advanceLine());
 }
 
 function setupRecognition() {
@@ -1357,48 +1357,41 @@ document.getElementById('start-rehearsal').addEventListener('click', () => {
   renderScriptDisplay();
   showStep('step-rehearse');
 
-  // Pre-generate the first other-character line immediately so it's ready
-  if (document.getElementById('use-piper')?.checked && piperReady) prefetchNextPiperLine(-1);
+  // Pre-generate all spoken lines; rehearsal starts only after this resolves
+  piperPrepareDone = prepareAllPiperAudio();
 
-  // Warm up speech synthesis with a silent utterance so the first real line plays
-  // (Chrome and some others swallow the first speak() after page load otherwise)
+  // Warm up speech synthesis so the first real line doesn't get swallowed
   try {
     const warmup = new SpeechSynthesisUtterance(' ');
     warmup.volume = 0;
     speechSynthesis.speak(warmup);
   } catch(e) {}
 
-  // Reload voices in case they weren't ready before
   voices = speechSynthesis.getVoices();
 
-  // Check if text mode is enabled (only as last resort)
   const textMode = document.getElementById('text-mode')?.checked;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   if (textMode) {
-    // User explicitly chose text mode
     const noMicFallback = document.getElementById('no-mic-fallback');
     if (noMicFallback) noMicFallback.classList.remove('hidden');
-    advanceLine();
+    piperPrepareDone.then(() => advanceLine());
   } else if (!SR) {
-    // Speech recognition API not available at all
     console.warn('Speech recognition API not available in this browser');
     const status = document.getElementById('listening-status');
-    if (status) status.textContent = '⚠️ Speech recognition not supported - use Skip button';
-    advanceLine();
+    piperPrepareDone.then(() => {
+      if (status) status.textContent = '⚠️ Speech recognition not supported - use Skip button';
+      advanceLine();
+    });
   } else if (!micPermissionGranted && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    // Show mic permission button for iOS/Android - must start recognition from user gesture
+    // Show mic button; user must tap it — by then audio will likely be ready
     const micDiv = document.getElementById('mic-permission');
     if (micDiv) micDiv.classList.remove('hidden');
-    if (micDiv) micDiv.querySelector('button').onclick = () => {
-      requestMicPermission();
-      // Don't advance line until mic is ready
-    };
+    if (micDiv) micDiv.querySelector('button').onclick = () => requestMicPermission();
   } else {
-    // Mic already available or not needed, start directly
     recognition = setupRecognition();
     startContinuousListening();
-    advanceLine();
+    piperPrepareDone.then(() => advanceLine());
   }
 });
 
@@ -1479,6 +1472,22 @@ function advanceLine() {
       advanceLine();
     });
   }
+}
+
+async function prepareAllPiperAudio() {
+  if (!document.getElementById('use-piper')?.checked || !piperReady) return;
+  const lines = parsedScript
+    .map((line, i) => ({ line, i }))
+    .filter(({ line }) => line.isDirection || line.character !== myCharacter);
+  if (lines.length === 0) return;
+  const statusEl = document.getElementById('listening-status');
+  let done = 0;
+  statusEl.textContent = `⏳ Preparing voices… 0 / ${lines.length}`;
+  for (const { i } of lines) {
+    try { await piperPredict(i); } catch (e) { console.error('Prefetch failed line', i, e); }
+    statusEl.textContent = `⏳ Preparing voices… ${++done} / ${lines.length}`;
+  }
+  statusEl.textContent = '';
 }
 
 // Generate (or return cached) audio blob for a given script line index.
@@ -1583,8 +1592,6 @@ function speakLine(text, character, onDone) {
 }
 
 function listenForLine(expectedText) {
-  // While user is speaking, pre-generate the next other-character line
-  prefetchNextPiperLine(currentLineIdx);
   document.getElementById('listening-status').innerHTML = ' Listening<span class="listening-indicator"></span>';
   if (!recognition) {
     // No speech recognition; user must use Skip button

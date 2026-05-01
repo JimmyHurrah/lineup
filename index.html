@@ -187,7 +187,6 @@
   <div id="saved-plays" style="margin-bottom:20px;">
     <h3 style="font-size:1em;margin-bottom:8px;">Saved Plays</h3>
     <div id="saved-plays-list"></div>
-    <button id="load-sample" class="secondary" style="font-size:0.9em;margin-bottom:10px;">📖 Load Sample Play (3 characters)</button>
     <input type="text" id="play-name" placeholder="Play name (for saving)" style="padding:8px;border-radius:8px;border:1px solid #ccc;width:200px;">
     <button id="save-current-play" class="secondary" style="font-size:0.9em;">💾 Save current script</button>
   </div>
@@ -626,12 +625,6 @@ document.getElementById('save-current-play').addEventListener('click', () => {
   savePlay(name, scriptText);
   document.getElementById('play-name').value = '';
   alert(`"${name}" saved!`);
-});
-
-// ============ Load sample play ============
-document.getElementById('load-sample').addEventListener('click', () => {
-  document.getElementById('script-text').value = SAMPLE_PLAY;
-  alert('Sample play loaded! Click "Parse script" to continue.');
 });
 
 function parseScript(text) {
@@ -1113,6 +1106,12 @@ populateVoices();
 
 // Initial saved plays load
 renderSavedPlays();
+
+// Auto-save sample play if not already saved
+const existingPlays = getSavedPlays();
+if (!existingPlays.find(p => p.name === 'Sample Play')) {
+  savePlay('Sample Play', SAMPLE_PLAY);
+}
 
 // Auto-load last active play if exists
 const activePlay = localStorage.getItem(ACTIVE_KEY);

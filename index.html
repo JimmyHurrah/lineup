@@ -187,6 +187,7 @@
   <div id="saved-plays" style="margin-bottom:20px;">
     <h3 style="font-size:1em;margin-bottom:8px;">Saved Plays</h3>
     <div id="saved-plays-list"></div>
+    <button id="load-sample" class="secondary" style="font-size:0.9em;margin-bottom:10px;">📖 Load Sample Play (3 characters)</button>
     <input type="text" id="play-name" placeholder="Play name (for saving)" style="padding:8px;border-radius:8px;border:1px solid #ccc;width:200px;">
     <button id="save-current-play" class="secondary" style="font-size:0.9em;">💾 Save current script</button>
   </div>
@@ -283,6 +284,11 @@
 <!-- STEP 4: Rehearse -->
 <div class="step hidden" id="step-rehearse">
   <h2>4. Rehearsal <span id="listening-status"></span></h2>
+  <div id="mic-permission" style="display:none;padding:10px;margin-bottom:10px;background:#fff3cd;border-radius:8px;">
+    <strong>🎤 Microphone access needed</strong>
+    <p style="margin:5px 0;font-size:0.9em;">Tap the button below to enable speech recognition</p>
+    <button onclick="requestMicPermission()" style="padding:8px 16px;">Enable Microphone</button>
+  </div>
   <div id="script-display"></div>
   <div class="controls-row" style="margin-top: 16px;">
     <button id="next-line">Skip / Next</button>
@@ -306,6 +312,19 @@ let characterVoiceMap = {};
 // ============ LocalStorage: Save/Load Plays ============
 const STORAGE_KEY = 'lineup_plays';
 const ACTIVE_KEY = 'lineup_active';
+
+const SAMPLE_PLAY = `ALICE: Good morning, Bob. How are you today?
+BOB: I'm doing great, Alice! The weather is beautiful.
+ALICE: It really is. Hey CHARLIE, come join us!
+CHARLIE: Thanks, Alice. I was just admiring the garden.
+BOB: Charlie, did you hear about the party tonight?
+CHARLIE: Yes, I heard it's going to be at the old mansion.
+ALICE: That's right! And there will be music and dancing.
+BOB: I can't wait. I've been practicing my dance moves all week.
+CHARLIE: (laughs) I'm sure you have, Bob.
+ALICE: Well, let's all meet at 8 PM then. Don't be late!
+BOB: We won't be. See you there!
+CHARLIE: Looking forward to it. This is going to be fun.`;
 
 function getSavedPlays() {
   try {
@@ -609,6 +628,12 @@ document.getElementById('save-current-play').addEventListener('click', () => {
   alert(`"${name}" saved!`);
 });
 
+// ============ Load sample play ============
+document.getElementById('load-sample').addEventListener('click', () => {
+  document.getElementById('script-text').value = SAMPLE_PLAY;
+  alert('Sample play loaded! Click "Parse script" to continue.');
+});
+
 function parseScript(text) {
   const lines = [];
   const rawLines = text.split('\n');
@@ -768,6 +793,28 @@ function getVoiceForCharacter(char) {
 // ============ Speech recognition (continuous) ============
 let recognitionActive = false;
 let currentLineMatcher = null; // {expected, onMatch} or null when not listening for a line
+let micPermissionGranted = false;
+
+function requestMicPermission() {
+  const micDiv = document.getElementById('mic-permission');
+  const status = document.getElementById('listening-status');
+
+  if (status) status.textContent = 'Requesting mic access...';
+
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(() => {
+      micPermissionGranted = true;
+      if (micDiv) micDiv.style.display = 'none';
+      if (status) status.textContent = '✓ Mic ready';
+      // Now start recognition
+      recognition = setupRecognition();
+      startContinuousListening();
+    })
+    .catch((err) => {
+      if (status) status.textContent = 'Mic access denied';
+      alert('Microphone access is needed for speech recognition. Please enable it in Settings > Safari > Microphone (on iOS) or browser settings.');
+    });
+}
 
 function setupRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -844,9 +891,21 @@ document.getElementById('start-rehearsal').addEventListener('click', () => {
   // Reload voices in case they weren't ready before
   voices = speechSynthesis.getVoices();
 
-  recognition = setupRecognition();
-  startContinuousListening();
-  advanceLine();
+  // Check if we need mic permission (iOS Safari)
+  const micDiv = document.getElementById('mic-permission');
+  if (!micPermissionGranted && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    // Show mic permission button for iOS
+    if (micDiv) micDiv.style.display = 'block';
+    if (micDiv) micDiv.querySelector('button').onclick = () => {
+      requestMicPermission();
+      // Don't advance line until mic is ready
+    };
+  } else {
+    // Mic already available or not needed, start directly
+    recognition = setupRecognition();
+    startContinuousListening();
+    advanceLine();
+  }
 });
 
 function renderScriptDisplay() {

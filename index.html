@@ -736,6 +736,15 @@ function renderCharacterVoiceAssignments() {
     return;
   }
 
+  // Deduplicate voices by name
+  const seen = new Set();
+  const uniqueVoices = voices.filter(v => {
+    const baseName = v.name.replace(/\s*\(.*?\)\s*/g, '').trim();
+    if (seen.has(baseName)) return false;
+    seen.add(baseName);
+    return true;
+  });
+
   parentDiv.style.display = 'block';
   container.innerHTML = '';
   others.forEach(c => {
@@ -744,12 +753,11 @@ function renderCharacterVoiceAssignments() {
     row.innerHTML = `<label style="min-width:120px;">${c}:</label>`;
     const sel = document.createElement('select');
     sel.id = `voice-for-${c}`;
-    // Populate with available voices
-    voices.forEach((v, i) => {
+    uniqueVoices.forEach((v, i) => {
       const opt = document.createElement('option');
-      opt.value = i;
+      opt.value = voices.indexOf(v);
       opt.textContent = `${v.name} (${v.lang})`;
-      if (characterVoiceAssignments[c] === i) opt.selected = true;
+      if (characterVoiceAssignments[c] === voices.indexOf(v)) opt.selected = true;
       sel.appendChild(opt);
     });
     sel.onchange = () => {
@@ -779,7 +787,17 @@ function populateVoices() {
   // Voices loaded successfully, hide init message
   if (initDiv) initDiv.style.display = 'none';
   if (status) status.textContent = `✓ ${voices.length} voices loaded`;
-  const sorted = [...voices].sort((a, b) => {
+
+  // Deduplicate voices by name (espeak-ng adds language variants of same voice)
+  const seen = new Set();
+  const unique = voices.filter(v => {
+    const baseName = v.name.replace(/\s*\(.*?\)\s*/g, '').trim();
+    if (seen.has(baseName)) return false;
+    seen.add(baseName);
+    return true;
+  });
+
+  const sorted = [...unique].sort((a, b) => {
     const aEn = a.lang.startsWith('en') ? 0 : 1;
     const bEn = b.lang.startsWith('en') ? 0 : 1;
     return aEn - bEn || a.name.localeCompare(b.name);

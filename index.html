@@ -301,6 +301,11 @@
     color: var(--text);
   }
 
+  /* ── Home screen ── */
+  .app-title { font-size: 2.4em; font-weight: 700; margin: 0 0 4px; letter-spacing: -0.5px; }
+  .app-tagline { color: var(--text-2); margin: 0 0 28px; font-size: 1em; }
+  #step-home > button { width: 100%; margin-bottom: 24px; font-size: 1.05em; padding: 14px; }
+
   /* ── Saved plays ── */
   .saved-play {
     display: flex;
@@ -406,17 +411,17 @@
 <p class="subtitle">Your rehearsal partner — practice your lines while the app reads everyone else's.</p>
 
 <!-- STEP 1: Get the script -->
-<div class="step" id="step-input">
-  <h2>1. Load your script</h2>
+<!-- HOME: Play list -->
+<div class="step" id="step-home">
+  <h1 class="app-title">LineUp</h1>
+  <p class="app-tagline">Your rehearsal partner</p>
+  <button id="add-play-btn">+ Add new play</button>
+  <div id="home-plays-list"></div>
+</div>
 
-  <div id="saved-plays" style="margin-bottom:20px;">
-    <h3 style="font-size:0.95em;margin:0 0 8px;color:var(--text-2);letter-spacing:0.3px;">Saved Plays</h3>
-    <div id="saved-plays-list"></div>
-    <div class="save-row">
-      <input type="text" id="play-name" placeholder="Play name…">
-      <button id="save-current-play" class="secondary">💾 Save script</button>
-    </div>
-  </div>
+<!-- STEP 1: Load script -->
+<div class="step hidden" id="step-input">
+  <h2>Add play</h2>
 
   <div style="margin-bottom: 12px;">
     <label>Script language:
@@ -476,13 +481,18 @@
 
   <div id="ocr-progress" class="progress hidden"></div>
   <button id="process-images" class="hidden">Read text from images</button>
+  <button id="back-to-home-from-input" class="secondary" style="margin-top:12px;">← Back</button>
 </div>
 
 <!-- STEP 2: Review & edit -->
 <div class="step hidden" id="step-edit">
-  <h2>2. Review the script</h2>
+  <h2>Review the script</h2>
   <p class="help-text">Fix any OCR mistakes. Format: <code>CHARACTER: line</code>. Lines in (parentheses) or [brackets] are stage directions.</p>
   <textarea class="script-editor" id="script-text"></textarea>
+  <div class="save-row">
+    <input type="text" id="play-name" placeholder="Play name…">
+    <button id="save-current-play" class="secondary">💾 Save</button>
+  </div>
   <button id="parse-script">Looks good →</button>
   <button id="back-to-input" class="secondary">← Back</button>
 </div>
@@ -507,10 +517,7 @@
     <label style="display:flex;margin-bottom:10px;">
       <input type="checkbox" id="strict-mode"> Strict matching (must say line correctly)
     </label>
-    <label style="display:flex;margin-bottom:6px;">
-      <input type="checkbox" id="use-piper"> Use Piper TTS (neural voices — no Swedish accent)
-    </label>
-    <div id="piper-status" style="font-size:0.85em;color:var(--text-2);margin-left:25px;"></div>
+    <div id="piper-status" style="font-size:0.85em;color:var(--text-2);"></div>
   </div>
   <button id="start-rehearsal" disabled>Start rehearsing →</button>
   <button id="back-to-edit" class="secondary">← Back</button>
@@ -621,18 +628,36 @@ function loadPlay(name) {
   if (!play) return;
   localStorage.setItem(ACTIVE_KEY, name);
   document.getElementById('script-text').value = play.scriptText;
-  // Load saved voice assignments if available
+  document.getElementById('play-name').value = name;
   if (play.voiceAssignments) characterVoiceAssignments = play.voiceAssignments;
   if (play.piperVoiceAssignments) piperVoiceAssignments = play.piperVoiceAssignments;
   if (play.myCharacter) myCharacter = play.myCharacter;
   showStep('step-edit');
 }
 
+function quickStartPlay(name) {
+  const play = getSavedPlays().find(p => p.name === name);
+  if (!play) return;
+  localStorage.setItem(ACTIVE_KEY, name);
+  document.getElementById('script-text').value = play.scriptText;
+  document.getElementById('play-name').value = name;
+  if (play.voiceAssignments) characterVoiceAssignments = play.voiceAssignments;
+  if (play.piperVoiceAssignments) piperVoiceAssignments = play.piperVoiceAssignments;
+  if (play.myCharacter) myCharacter = play.myCharacter;
+  parsedScript = parseScript(play.scriptText);
+  characters = [...new Set(parsedScript.filter(l => !l.isDirection).map(l => l.character))];
+  renderCharacterList();
+  populateVoices();
+  showStep('step-character');
+  initPiper();
+}
+
 function renderSavedPlays() {
-  const container = document.getElementById('saved-plays-list');
+  const container = document.getElementById('home-plays-list');
+  if (!container) return;
   const plays = getSavedPlays();
   if (plays.length === 0) {
-    container.innerHTML = '<p class="help-text">No saved plays yet. Load or paste a script and it will appear here.</p>';
+    container.innerHTML = '<p class="help-text" style="margin-top:24px;text-align:center;">No plays yet — add one to get started.</p>';
     return;
   }
   container.innerHTML = plays.map(p => `
@@ -642,7 +667,8 @@ function renderSavedPlays() {
         <div class="saved-play-date">${new Date(p.date).toLocaleDateString()}</div>
       </div>
       <div class="saved-play-actions">
-        <button onclick="loadPlay('${escapeHtml(p.name)}')" style="padding:7px 14px;font-size:0.88em;">Load</button>
+        <button onclick="quickStartPlay('${escapeHtml(p.name)}')" style="padding:7px 14px;font-size:0.88em;">Rehearse</button>
+        <button onclick="loadPlay('${escapeHtml(p.name)}')" class="secondary" style="padding:7px 14px;font-size:0.88em;">Edit</button>
         <button onclick="deletePlay('${escapeHtml(p.name)}')" class="danger" style="padding:7px 14px;font-size:0.88em;">Delete</button>
       </div>
     </div>
@@ -863,11 +889,12 @@ document.getElementById('parse-script').addEventListener('click', () => {
     return;
   }
   characters = [...new Set(parsedScript.filter(l => !l.isDirection).map(l => l.character))];
-  // Reset voice assignments for new script
   characterVoiceAssignments = {};
+  piperVoiceAssignments = {};
   renderCharacterList();
   populateVoices();
   showStep('step-character');
+  initPiper();
 });
 
 // ============ Save current play ============
@@ -970,7 +997,7 @@ function renderCharacterVoiceAssignments() {
     return;
   }
 
-  const usePiper = document.getElementById('use-piper')?.checked;
+  const usePiper = true;
   parentDiv.style.display = 'block';
   container.innerHTML = '';
 
@@ -1127,20 +1154,59 @@ if (document.readyState === 'loading') {
 
 // ============ Piper TTS Engine ============
 const PIPER_VOICES = [
-  { key: 'en-f1', id: 'en_US-hfc_female-medium', label: 'English – Female',  lang: 'en' },
-  { key: 'en-m1', id: 'en_US-arctic-medium',     label: 'English – Male',    lang: 'en' },
-  { key: 'en-gb', id: 'en_GB-alan-medium',        label: 'English GB – Male', lang: 'en' },
-  { key: 'sv',    id: 'sv_SE-nst-medium',          label: 'Swedish',          lang: 'sv' },
-  { key: 'de-m',  id: 'de_DE-thorsten-medium',     label: 'German – Male',    lang: 'de' },
-  { key: 'de-f',  id: 'de_DE-kerstin-low',         label: 'German – Female',  lang: 'de' },
-  { key: 'fr-f',  id: 'fr_FR-siwis-medium',        label: 'French – Female',  lang: 'fr' },
-  { key: 'fr-m',  id: 'fr_FR-gilles-low',          label: 'French – Male',    lang: 'fr' },
-  { key: 'es',    id: 'es_ES-carlfm-x_low',        label: 'Spanish',          lang: 'es' },
-  { key: 'it-m',  id: 'it_IT-riccardo-x_low',      label: 'Italian – Male',   lang: 'it' },
-  { key: 'it-f',  id: 'it_IT-paola-medium',        label: 'Italian – Female', lang: 'it' },
-  { key: 'nb',    id: 'no_NO-talesyntese-medium',   label: 'Norwegian',        lang: 'nb' },
-  { key: 'da',    id: 'da_DK-talesyntese-medium',   label: 'Danish',           lang: 'da' },
-  { key: 'fi',    id: 'fi_FI-harri-low',            label: 'Finnish',          lang: 'fi' },
+  // English US – Female
+  { key: 'en-us-f1', id: 'en_US-hfc_female-medium',  label: 'US Female 1',      lang: 'en' },
+  { key: 'en-us-f2', id: 'en_US-amy-medium',          label: 'US Female 2',      lang: 'en' },
+  { key: 'en-us-f3', id: 'en_US-kristin-medium',      label: 'US Female 3',      lang: 'en' },
+  { key: 'en-us-f4', id: 'en_US-ljspeech-medium',     label: 'US Female 4',      lang: 'en' },
+  { key: 'en-us-f5', id: 'en_US-kathleen-low',        label: 'US Female 5',      lang: 'en' },
+  // English US – Male
+  { key: 'en-us-m1', id: 'en_US-hfc_male-medium',    label: 'US Male 1',        lang: 'en' },
+  { key: 'en-us-m2', id: 'en_US-ryan-medium',         label: 'US Male 2',        lang: 'en' },
+  { key: 'en-us-m3', id: 'en_US-joe-medium',          label: 'US Male 3',        lang: 'en' },
+  { key: 'en-us-m4', id: 'en_US-john-medium',         label: 'US Male 4',        lang: 'en' },
+  { key: 'en-us-m5', id: 'en_US-norman-medium',       label: 'US Male 5',        lang: 'en' },
+  { key: 'en-us-m6', id: 'en_US-arctic-medium',       label: 'US Male 6',        lang: 'en' },
+  // English GB – Female
+  { key: 'en-gb-f1', id: 'en_GB-cori-medium',         label: 'GB Female 1',      lang: 'en' },
+  { key: 'en-gb-f2', id: 'en_GB-alba-medium',         label: 'GB Female 2',      lang: 'en' },
+  { key: 'en-gb-f3', id: 'en_GB-jenny_dioco-medium',  label: 'GB Female 3',      lang: 'en' },
+  { key: 'en-gb-f4', id: 'en_GB-southern_english_female-low', label: 'GB Female 4', lang: 'en' },
+  // English GB – Male
+  { key: 'en-gb-m1', id: 'en_GB-alan-medium',               label: 'GB Male 1',  lang: 'en' },
+  { key: 'en-gb-m2', id: 'en_GB-northern_english_male-medium', label: 'GB Male 2', lang: 'en' },
+  { key: 'en-gb-m3', id: 'en_GB-aru-medium',               label: 'GB Male 3',   lang: 'en' },
+  // Swedish
+  { key: 'sv-1',   id: 'sv_SE-nst-medium',              label: 'Swedish',         lang: 'sv' },
+  // German – Female
+  { key: 'de-f1',  id: 'de_DE-kerstin-low',             label: 'German Female 1', lang: 'de' },
+  { key: 'de-f2',  id: 'de_DE-eva_k-x_low',             label: 'German Female 2', lang: 'de' },
+  { key: 'de-f3',  id: 'de_DE-ramona-low',              label: 'German Female 3', lang: 'de' },
+  // German – Male
+  { key: 'de-m1',  id: 'de_DE-thorsten-high',           label: 'German Male 1',   lang: 'de' },
+  { key: 'de-m2',  id: 'de_DE-karlsson-low',            label: 'German Male 2',   lang: 'de' },
+  { key: 'de-m3',  id: 'de_DE-pavoque-low',             label: 'German Male 3',   lang: 'de' },
+  // French – Female
+  { key: 'fr-f1',  id: 'fr_FR-siwis-medium',            label: 'French Female 1', lang: 'fr' },
+  { key: 'fr-f2',  id: 'fr_FR-upmc-medium',             label: 'French Female 2', lang: 'fr' },
+  { key: 'fr-f3',  id: 'fr_FR-mls-medium',              label: 'French Female 3', lang: 'fr' },
+  // French – Male
+  { key: 'fr-m1',  id: 'fr_FR-gilles-low',              label: 'French Male 1',   lang: 'fr' },
+  { key: 'fr-m2',  id: 'fr_FR-tom-medium',              label: 'French Male 2',   lang: 'fr' },
+  // Spanish
+  { key: 'es-f1',  id: 'es_ES-sharvard-medium',         label: 'Spanish Female',  lang: 'es' },
+  { key: 'es-m1',  id: 'es_ES-davefx-medium',           label: 'Spanish Male 1',  lang: 'es' },
+  { key: 'es-m2',  id: 'es_MX-ald-medium',              label: 'Spanish Male 2',  lang: 'es' },
+  { key: 'es-m3',  id: 'es_ES-carlfm-x_low',            label: 'Spanish Male 3',  lang: 'es' },
+  // Italian
+  { key: 'it-f1',  id: 'it_IT-paola-medium',            label: 'Italian Female',  lang: 'it' },
+  { key: 'it-m1',  id: 'it_IT-riccardo-x_low',          label: 'Italian Male',    lang: 'it' },
+  // Norwegian
+  { key: 'nb-1',   id: 'no_NO-talesyntese-medium',      label: 'Norwegian',       lang: 'nb' },
+  // Danish
+  { key: 'da-1',   id: 'da_DK-talesyntese-medium',      label: 'Danish',          lang: 'da' },
+  // Finnish
+  { key: 'fi-1',   id: 'fi_FI-harri-medium',            label: 'Finnish',         lang: 'fi' },
 ];
 
 let piperReady = false;
@@ -1176,7 +1242,6 @@ async function downloadPiperVoice(modelId, onProgress) {
 }
 
 async function initPiper() {
-  if (!document.getElementById('use-piper')?.checked) return;
   const statusEl = document.getElementById('piper-status');
   const startBtn = document.getElementById('start-rehearsal');
 
@@ -1219,24 +1284,12 @@ async function initPiper() {
   if (startBtn && myCharacter) startBtn.disabled = false;
 }
 
-document.getElementById('use-piper').addEventListener('change', (e) => {
-  piperReady = false;
-  renderCharacterVoiceAssignments();
-  if (e.target.checked) {
-    initPiper();
-  } else {
-    const statusEl = document.getElementById('piper-status');
-    if (statusEl) statusEl.textContent = '';
-  }
-});
-
-// Re-render voice dropdowns (and re-init Piper if active) when script language changes
+// Re-render voice dropdowns when script language changes
 document.getElementById('lang-select').addEventListener('change', () => {
+  piperVoiceAssignments = {};
   renderCharacterVoiceAssignments();
-  if (document.getElementById('use-piper')?.checked) {
-    piperReady = false;
-    initPiper();
-  }
+  piperReady = false;
+  initPiper();
 });
 
 function getVoiceForCharacter(char) {
@@ -1475,7 +1528,7 @@ function advanceLine() {
 }
 
 async function prepareAllPiperAudio() {
-  if (!document.getElementById('use-piper')?.checked || !piperReady) return;
+  if (!true || !piperReady) return;
   const lines = parsedScript
     .map((line, i) => ({ line, i }))
     .filter(({ line }) => line.isDirection || line.character !== myCharacter);
@@ -1511,7 +1564,7 @@ function piperPredict(lineIdx) {
 
 // Kick off generation for the next other-character line so it's ready when needed.
 function prefetchNextPiperLine(fromIdx) {
-  if (!document.getElementById('use-piper')?.checked || !piperReady) return;
+  if (!true || !piperReady) return;
   for (let i = fromIdx + 1; i < parsedScript.length; i++) {
     const line = parsedScript[i];
     if (!line.isDirection && line.character !== myCharacter) {
@@ -1522,7 +1575,7 @@ function prefetchNextPiperLine(fromIdx) {
 }
 
 function speakLine(text, character, onDone) {
-  const usePiper = document.getElementById('use-piper')?.checked;
+  const usePiper = true;
 
   if (usePiper && piperReady) {
     const lineIdx = currentLineIdx;
@@ -1690,11 +1743,17 @@ document.getElementById('exit-rehearsal').addEventListener('click', () => {
 });
 
 // ============ Step navigation ============
+document.getElementById('add-play-btn').addEventListener('click', () => {
+  document.getElementById('script-text').value = '';
+  document.getElementById('play-name').value = '';
+  showStep('step-input');
+});
+document.getElementById('back-to-home-from-input').addEventListener('click', () => showStep('step-home'));
 document.getElementById('back-to-input').addEventListener('click', () => showStep('step-input'));
 document.getElementById('back-to-edit').addEventListener('click', () => showStep('step-edit'));
 
 function showStep(id) {
-  ['step-input', 'step-edit', 'step-character', 'step-rehearse'].forEach(s => {
+  ['step-home', 'step-input', 'step-edit', 'step-character', 'step-rehearse'].forEach(s => {
     document.getElementById(s).classList.toggle('hidden', s !== id);
   });
 }
@@ -1709,15 +1768,7 @@ renderSavedPlays();
 const existingPlays = getSavedPlays();
 if (!existingPlays.find(p => p.name === 'Sample Play')) {
   savePlay('Sample Play', SAMPLE_PLAY);
-}
-
-// Auto-load last active play if exists
-const activePlay = localStorage.getItem(ACTIVE_KEY);
-if (activePlay) {
-  const play = getSavedPlays().find(p => p.name === activePlay);
-  if (play) {
-    document.getElementById('script-text').value = play.scriptText;
-  }
+  renderSavedPlays();
 }
 </script>
 </body>

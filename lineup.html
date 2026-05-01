@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LineUp — Rehearsal Partner</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background: #f5f5f7;
+    color: #1d1d1f;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.8em; margin-bottom: 0.2em; }
+  .subtitle { color: #6e6e73; margin-bottom: 2em; }
+  .step {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .step h2 { margin-top: 0; font-size: 1.2em; }
+  button {
+    background: #0071e3;
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 1em;
+    cursor: pointer;
+    margin-right: 8px;
+    margin-top: 8px;
+  }
+  button:hover { background: #0077ed; }
+  button:disabled { background: #c7c7cc; cursor: not-allowed; }
+  button.secondary { background: #e5e5ea; color: #1d1d1f; }
+  button.secondary:hover { background: #d1d1d6; }
+  button.danger { background: #ff3b30; }
+  #video, #canvas { width: 100%; max-width: 600px; border-radius: 8px; background: #000; }
+  #canvas { display: none; }
+  .preview-img { max-width: 100%; border-radius: 8px; margin-top: 10px; }
+  .progress { margin-top: 10px; color: #6e6e73; font-size: 0.9em; }
+  .script-editor {
+    width: 100%;
+    min-height: 300px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 14px;
+    padding: 12px;
+    border: 1px solid #d2d2d7;
+    border-radius: 8px;
+    resize: vertical;
+  }
+  .character-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .character-chip {
+    padding: 6px 14px;
+    background: #e5e5ea;
+    border-radius: 20px;
+    cursor: pointer;
+    border: 2px solid transparent;
+  }
+  .character-chip.selected {
+    background: #0071e3;
+    color: white;
+    border-color: #0071e3;
+  }
+  .rehearsal-line {
+    padding: 12px 16px;
+    margin: 8px 0;
+    border-radius: 8px;
+    border-left: 4px solid #d2d2d7;
+    background: #fafafa;
+    transition: all 0.2s;
+  }
+  .rehearsal-line.current {
+    border-left-color: #0071e3;
+    background: #f0f7ff;
+  }
+  .rehearsal-line.mine {
+    border-left-color: #34c759;
+  }
+  .rehearsal-line.mine.current {
+    background: #f0fff4;
+    border-left-color: #34c759;
+  }
+  .rehearsal-line.done {
+    opacity: 0.5;
+  }
+  .character-name {
+    font-weight: 600;
+    font-size: 0.85em;
+    text-transform: uppercase;
+    color: #6e6e73;
+    letter-spacing: 0.5px;
+  }
+  .line-text { margin-top: 4px; }
+  .stage-direction {
+    font-style: italic;
+    color: #6e6e73;
+    padding: 8px 16px;
+    margin: 8px 0;
+  }
+  .listening-indicator {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #ff3b30;
+    margin-left: 8px;
+    animation: pulse 1s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  .heard-text {
+    font-size: 0.85em;
+    color: #6e6e73;
+    margin-top: 6px;
+    font-style: italic;
+  }
+  .controls-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: 16px;
+    font-size: 0.95em;
+  }
+  select {
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #d2d2d7;
+    background: white;
+  }
+  .hidden { display: none !important; }
+  .help-text {
+    font-size: 0.9em;
+    color: #6e6e73;
+    margin-top: 8px;
+  }
+  .tab-buttons {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid #d2d2d7;
+  }
+  .tab-button {
+    background: transparent;
+    color: #6e6e73;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    margin: 0;
+    padding: 8px 16px;
+  }
+  .tab-button.active {
+    color: #0071e3;
+    border-bottom-color: #0071e3;
+  }
+</style>
+</head>
+<body>
+
+<h1>🎭 LineUp</h1>
+<p class="subtitle">Your rehearsal partner — practice your lines while the app reads everyone else's.</p>
+
+<!-- STEP 1: Get the script -->
+<div class="step" id="step-input">
+  <h2>1. Load your script</h2>
+
+  <div style="margin-bottom: 12px;">
+    <label>Script language:
+      <select id="lang-select">
+        <option value="eng|en-US">English</option>
+        <option value="swe|sv-SE">Swedish</option>
+        <option value="eng+swe|en-US">English + Swedish (mixed)</option>
+        <option value="deu|de-DE">German</option>
+        <option value="fra|fr-FR">French</option>
+        <option value="spa|es-ES">Spanish</option>
+        <option value="ita|it-IT">Italian</option>
+        <option value="nor|nb-NO">Norwegian</option>
+        <option value="dan|da-DK">Danish</option>
+        <option value="fin|fi-FI">Finnish</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="tab-buttons">
+    <button class="tab-button active" data-tab="camera">📷 Camera</button>
+    <button class="tab-button" data-tab="upload">🖼️ Upload photo</button>
+    <button class="tab-button" data-tab="paste">✏️ Paste text</button>
+  </div>
+
+  <div id="tab-camera" class="tab-content">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+    <div class="controls-row">
+      <button id="start-camera">Start camera</button>
+      <button id="capture" disabled>📸 Capture page</button>
+      <button id="stop-camera" class="secondary" disabled>Stop camera</button>
+    </div>
+    <p class="help-text">Lay the page flat under good light. You can capture multiple pages — they'll be combined.</p>
+    <div id="captured-pages"></div>
+  </div>
+
+  <div id="tab-upload" class="tab-content hidden">
+    <input type="file" id="file-input" accept="image/*" multiple>
+    <p class="help-text">Select one or more photos of your script pages.</p>
+    <div id="uploaded-pages"></div>
+  </div>
+
+  <div id="tab-paste" class="tab-content hidden">
+    <textarea class="script-editor" id="paste-area" placeholder="Paste your script here. Format like:&#10;&#10;BOB: So why are you called fool?&#10;FOOL: That's just my name.&#10;SUSAN: I never heard of anyone called Fool before."></textarea>
+    <button id="use-pasted">Use this text</button>
+  </div>
+
+  <div id="ocr-progress" class="progress hidden"></div>
+  <button id="process-images" class="hidden">Read text from images</button>
+</div>
+
+<!-- STEP 2: Review & edit -->
+<div class="step hidden" id="step-edit">
+  <h2>2. Review the script</h2>
+  <p class="help-text">Fix any OCR mistakes. Format: <code>CHARACTER: line</code>. Lines in (parentheses) or [brackets] are stage directions.</p>
+  <textarea class="script-editor" id="script-text"></textarea>
+  <button id="parse-script">Looks good →</button>
+  <button id="back-to-input" class="secondary">← Back</button>
+</div>
+
+<!-- STEP 3: Pick character -->
+<div class="step hidden" id="step-character">
+  <h2>3. Which character are you?</h2>
+  <div class="character-list" id="character-list"></div>
+  <div class="controls-row" style="margin-top: 16px;">
+    <label>Voice for others:
+      <select id="voice-select"></select>
+    </label>
+    <label>
+      <input type="checkbox" id="strict-mode"> Strict matching (must say line correctly)
+    </label>
+  </div>
+  <button id="start-rehearsal" disabled>Start rehearsing →</button>
+  <button id="back-to-edit" class="secondary">← Back</button>
+</div>
+
+<!-- STEP 4: Rehearse -->
+<div class="step hidden" id="step-rehearse">
+  <h2>4. Rehearsal <span id="listening-status"></span></h2>
+  <div id="script-display"></div>
+  <div class="controls-row" style="margin-top: 16px;">
+    <button id="next-line">Skip / Next</button>
+    <button id="repeat-line" class="secondary">Repeat last line</button>
+    <button id="restart" class="secondary">Restart from top</button>
+    <button id="exit-rehearsal" class="danger">Exit</button>
+  </div>
+</div>
+
+<script>
+// ============ State ============
+let capturedImages = [];  // data URLs
+let parsedScript = [];    // [{character, text, isDirection}]
+let characters = [];
+let myCharacter = null;
+let currentLineIdx = 0;
+let recognition = null;
+let voices = [];
+let characterVoiceMap = {};
+
+// ============ Tab switching ============
+document.querySelectorAll('.tab-button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.remove('hidden');
+  });
+});
+
+// ============ Camera ============
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+let stream = null;
+
+document.getElementById('start-camera').addEventListener('click', async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+    });
+    video.srcObject = stream;
+    document.getElementById('start-camera').disabled = true;
+    document.getElementById('capture').disabled = false;
+    document.getElementById('stop-camera').disabled = false;
+  } catch (err) {
+    alert('Could not access camera: ' + err.message);
+  }
+});
+
+document.getElementById('stop-camera').addEventListener('click', () => {
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+  video.srcObject = null;
+  document.getElementById('start-camera').disabled = false;
+  document.getElementById('capture').disabled = true;
+  document.getElementById('stop-camera').disabled = true;
+});
+
+document.getElementById('capture').addEventListener('click', () => {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+  capturedImages.push(dataUrl);
+  renderCapturedPages();
+  document.getElementById('process-images').classList.remove('hidden');
+});
+
+function renderCapturedPages() {
+  const container = document.getElementById('captured-pages');
+  container.innerHTML = '<p class="help-text">Captured ' + capturedImages.length + ' page(s):</p>';
+  capturedImages.forEach((src, i) => {
+    const wrap = document.createElement('div');
+    wrap.style.display = 'inline-block';
+    wrap.style.margin = '4px';
+    wrap.style.position = 'relative';
+    const img = document.createElement('img');
+    img.src = src;
+    img.style.maxWidth = '120px';
+    img.style.borderRadius = '4px';
+    img.style.border = '1px solid #d2d2d7';
+    const del = document.createElement('button');
+    del.textContent = '×';
+    del.style.position = 'absolute';
+    del.style.top = '0';
+    del.style.right = '0';
+    del.style.padding = '2px 8px';
+    del.style.margin = '0';
+    del.style.background = '#ff3b30';
+    del.onclick = () => {
+      capturedImages.splice(i, 1);
+      renderCapturedPages();
+      if (capturedImages.length === 0) {
+        document.getElementById('process-images').classList.add('hidden');
+      }
+    };
+    wrap.appendChild(img);
+    wrap.appendChild(del);
+    container.appendChild(wrap);
+  });
+}
+
+// ============ File upload ============
+document.getElementById('file-input').addEventListener('change', async (e) => {
+  for (const file of e.target.files) {
+    const reader = new FileReader();
+    await new Promise(resolve => {
+      reader.onload = () => {
+        capturedImages.push(reader.result);
+        resolve();
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  renderCapturedPages();
+  if (capturedImages.length > 0) {
+    document.getElementById('process-images').classList.remove('hidden');
+  }
+});
+
+// ============ Paste ============
+document.getElementById('use-pasted').addEventListener('click', () => {
+  const text = document.getElementById('paste-area').value.trim();
+  if (!text) {
+    alert('Please paste some script text first.');
+    return;
+  }
+  document.getElementById('script-text').value = text;
+  showStep('step-edit');
+});
+
+// ============ OCR ============
+document.getElementById('process-images').addEventListener('click', async () => {
+  if (capturedImages.length === 0) return;
+  const progress = document.getElementById('ocr-progress');
+  progress.classList.remove('hidden');
+  progress.textContent = 'Loading OCR engine...';
+
+  let combined = '';
+  try {
+    const ocrLang = document.getElementById('lang-select').value.split('|')[0];
+    const worker = await Tesseract.createWorker(ocrLang, 1, {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          progress.textContent = `Reading page... ${Math.round(m.progress * 100)}%`;
+        }
+      }
+    });
+
+    for (let i = 0; i < capturedImages.length; i++) {
+      progress.textContent = `Reading page ${i+1} of ${capturedImages.length}...`;
+      const { data: { text } } = await worker.recognize(capturedImages[i]);
+      combined += text + '\n\n';
+    }
+    await worker.terminate();
+    progress.classList.add('hidden');
+
+    document.getElementById('script-text').value = cleanupOcr(combined);
+    showStep('step-edit');
+  } catch (err) {
+    progress.textContent = 'OCR failed: ' + err.message;
+  }
+});
+
+function cleanupOcr(text) {
+  // Light cleanup: collapse multiple blank lines, fix common OCR issues
+  return text
+    .replace(/\r/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/^[ \t]+|[ \t]+$/gm, '')
+    .trim();
+}
+
+// ============ Parse script ============
+document.getElementById('parse-script').addEventListener('click', () => {
+  const text = document.getElementById('script-text').value;
+  parsedScript = parseScript(text);
+  if (parsedScript.filter(l => !l.isDirection).length === 0) {
+    alert('No dialogue lines detected. Format should be:\nCHARACTER: line text');
+    return;
+  }
+  characters = [...new Set(parsedScript.filter(l => !l.isDirection).map(l => l.character))];
+  renderCharacterList();
+  populateVoices();
+  showStep('step-character');
+});
+
+function parseScript(text) {
+  const lines = [];
+  const rawLines = text.split('\n');
+  let current = null;
+  let lastWasBlank = true; // start of script counts as "after a break"
+
+  for (let raw of rawLines) {
+    const line = raw.trim();
+    if (!line) {
+      if (current) { lines.push(current); current = null; }
+      lastWasBlank = true;
+      continue;
+    }
+
+    // Whole-line stage direction in parens or brackets
+    if (/^[\(\[].*[\)\]]$/.test(line)) {
+      if (current) { lines.push(current); current = null; }
+      lines.push({ isDirection: true, text: line.replace(/^[\(\[]|[\)\]]$/g, '') });
+      lastWasBlank = false;
+      continue;
+    }
+
+    // CHARACTER: line
+    const match = line.match(/^([A-ZÅÄÖa-zåäö][A-ZÅÄÖa-zåäö\s\.\-']{0,30}?)\s*[::]\s*(.*)$/);
+    if (match) {
+      if (current) { lines.push(current); }
+      const charName = match[1].trim().toUpperCase();
+      let lineText = match[2].trim();
+      lineText = lineText.replace(/[\(\[][^\)\]]*[\)\]]/g, '').trim();
+      current = { character: charName, text: lineText, isDirection: false };
+      lastWasBlank = false;
+      continue;
+    }
+
+    // No colon. Could be (a) continuation of previous dialogue or (b) a stage direction
+    // Heuristic: if previous line was blank, treat as a new stage direction.
+    // If we're mid-dialogue with no blank line between, treat as continuation.
+    let cleaned = line.replace(/[\(\[][^\)\]]*[\)\]]/g, '').trim();
+    if (!cleaned) { lastWasBlank = false; continue; }
+
+    if (current && !lastWasBlank) {
+      // Continuation of current dialogue
+      current.text += ' ' + cleaned;
+    } else {
+      // Orphan line after a break — treat as a stage direction
+      if (current) { lines.push(current); current = null; }
+      lines.push({ isDirection: true, text: cleaned });
+    }
+    lastWasBlank = false;
+  }
+  if (current) lines.push(current);
+  return lines.filter(l => l.isDirection || l.text);
+}
+
+function renderCharacterList() {
+  const container = document.getElementById('character-list');
+  container.innerHTML = '';
+  characters.forEach(c => {
+    const chip = document.createElement('div');
+    chip.className = 'character-chip';
+    chip.textContent = c;
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.character-chip').forEach(el => el.classList.remove('selected'));
+      chip.classList.add('selected');
+      myCharacter = c;
+      document.getElementById('start-rehearsal').disabled = false;
+    });
+    container.appendChild(chip);
+  });
+}
+
+// ============ Voices ============
+function populateVoices() {
+  voices = speechSynthesis.getVoices();
+  const select = document.getElementById('voice-select');
+  select.innerHTML = '';
+  // Prefer English voices but show all
+  const sorted = [...voices].sort((a, b) => {
+    const aEn = a.lang.startsWith('en') ? 0 : 1;
+    const bEn = b.lang.startsWith('en') ? 0 : 1;
+    return aEn - bEn || a.name.localeCompare(b.name);
+  });
+  sorted.forEach((v, i) => {
+    const opt = document.createElement('option');
+    opt.value = voices.indexOf(v);
+    opt.textContent = `${v.name} (${v.lang})`;
+    select.appendChild(opt);
+  });
+}
+speechSynthesis.onvoiceschanged = populateVoices;
+
+function getVoiceForCharacter(char) {
+  // Assign a voice per character so they sound different
+  if (characterVoiceMap[char]) return characterVoiceMap[char];
+  const baseIdx = parseInt(document.getElementById('voice-select').value) || 0;
+  const baseVoice = voices[baseIdx];
+  const lang = baseVoice ? baseVoice.lang : 'en-US';
+  const sameLang = voices.filter(v => v.lang === lang);
+  const others = characters.filter(c => c !== myCharacter);
+  const idx = others.indexOf(char);
+  const voice = sameLang[idx % sameLang.length] || baseVoice;
+  characterVoiceMap[char] = voice;
+  return voice;
+}
+
+// ============ Speech recognition (continuous) ============
+let recognitionActive = false;
+let currentLineMatcher = null; // {expected, onMatch} or null when not listening for a line
+
+function setupRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    alert('Speech recognition not supported in this browser. Try Chrome or Edge. You can still use the Skip button to advance.');
+    return null;
+  }
+  const r = new SR();
+  r.continuous = true;
+  r.interimResults = true;
+  const langSelect = document.getElementById('lang-select');
+  r.lang = langSelect ? langSelect.value.split('|')[1] : 'en-US';
+
+  r.onresult = (event) => {
+    if (!currentLineMatcher) return; // not her turn — ignore audio
+    let finalTranscript = '';
+    let interim = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const t = event.results[i][0].transcript;
+      if (event.results[i].isFinal) finalTranscript += ' ' + t;
+      else interim += t;
+    }
+    currentLineMatcher.handle(finalTranscript, interim);
+  };
+
+  r.onerror = (e) => {
+    console.warn('Recognition error', e.error);
+    if (e.error === 'no-speech' || e.error === 'aborted') {
+      // benign — recognition will auto-restart via onend
+    } else if (e.error === 'not-allowed') {
+      alert('Microphone permission denied. Please allow microphone access and reload.');
+      recognitionActive = false;
+    }
+  };
+
+  r.onend = () => {
+    // Auto-restart so we keep listening across the whole rehearsal
+    if (recognitionActive) {
+      try { r.start(); } catch(e) { /* already started */ }
+    }
+  };
+
+  return r;
+}
+
+function startContinuousListening() {
+  if (!recognition) return;
+  recognitionActive = true;
+  try { recognition.start(); } catch(e) { /* already running */ }
+}
+
+function stopContinuousListening() {
+  recognitionActive = false;
+  if (recognition) {
+    try { recognition.stop(); } catch(e) {}
+  }
+}
+
+// ============ Rehearsal flow ============
+document.getElementById('start-rehearsal').addEventListener('click', () => {
+  currentLineIdx = 0;
+  characterVoiceMap = {};
+  renderScriptDisplay();
+  showStep('step-rehearse');
+
+  // Warm up speech synthesis with a silent utterance so the first real line plays
+  // (Chrome and some others swallow the first speak() after page load otherwise)
+  try {
+    const warmup = new SpeechSynthesisUtterance(' ');
+    warmup.volume = 0;
+    speechSynthesis.speak(warmup);
+  } catch(e) {}
+
+  // Reload voices in case they weren't ready before
+  voices = speechSynthesis.getVoices();
+
+  recognition = setupRecognition();
+  startContinuousListening();
+  advanceLine();
+});
+
+function renderScriptDisplay() {
+  const container = document.getElementById('script-display');
+  container.innerHTML = '';
+  parsedScript.forEach((line, i) => {
+    const div = document.createElement('div');
+    div.id = 'line-' + i;
+    if (line.isDirection) {
+      div.className = 'stage-direction';
+      div.textContent = '— ' + line.text + ' —';
+    } else {
+      div.className = 'rehearsal-line';
+      if (line.character === myCharacter) div.classList.add('mine');
+      div.innerHTML = `<div class="character-name">${escapeHtml(line.character)}${line.character === myCharacter ? ' (you)' : ''}</div><div class="line-text">${escapeHtml(line.text)}</div>`;
+    }
+    container.appendChild(div);
+  });
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function highlightLine(idx) {
+  document.querySelectorAll('.rehearsal-line, .stage-direction').forEach(el => {
+    el.classList.remove('current');
+  });
+  const el = document.getElementById('line-' + idx);
+  if (el) {
+    el.classList.add('current');
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  // Mark previous lines as done
+  for (let i = 0; i < idx; i++) {
+    const prev = document.getElementById('line-' + i);
+    if (prev) prev.classList.add('done');
+  }
+}
+
+function advanceLine() {
+  if (currentLineIdx >= parsedScript.length) {
+    speechSynthesis.cancel();
+    stopContinuousListening();
+    currentLineMatcher = null;
+    document.getElementById('listening-status').textContent = ' — Done! 🎉';
+    return;
+  }
+  const line = parsedScript[currentLineIdx];
+  highlightLine(currentLineIdx);
+
+  if (line.isDirection) {
+    currentLineMatcher = null;
+    speakLine(line.text, null, () => {
+      currentLineIdx++;
+      advanceLine();
+    });
+  } else if (line.character === myCharacter) {
+    listenForLine(line.text);
+  } else {
+    currentLineMatcher = null;
+    speakLine(line.text, line.character, () => {
+      currentLineIdx++;
+      advanceLine();
+    });
+  }
+}
+
+function speakLine(text, character, onDone) {
+  document.getElementById('listening-status').textContent = '';
+  const utter = new SpeechSynthesisUtterance(text);
+  if (character) {
+    const v = getVoiceForCharacter(character);
+    if (v) utter.voice = v;
+  }
+  utter.rate = 0.95;
+  utter.onend = onDone;
+  utter.onerror = onDone;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utter);
+}
+
+function listenForLine(expectedText) {
+  document.getElementById('listening-status').innerHTML = ' Listening<span class="listening-indicator"></span>';
+  if (!recognition) {
+    // No speech recognition; user must use Skip button
+    return;
+  }
+
+  const lineEl = document.getElementById('line-' + currentLineIdx);
+  let heardEl = lineEl.querySelector('.heard-text');
+  if (!heardEl) {
+    heardEl = document.createElement('div');
+    heardEl.className = 'heard-text';
+    lineEl.appendChild(heardEl);
+  }
+  heardEl.textContent = '';
+
+  const strict = document.getElementById('strict-mode').checked;
+  const expected = expectedText.toLowerCase();
+  let accumulatedFinal = '';
+
+  currentLineMatcher = {
+    handle(finalTranscript, interim) {
+      if (finalTranscript) accumulatedFinal += ' ' + finalTranscript;
+      const display = (accumulatedFinal + ' ' + interim).trim();
+      heardEl.textContent = '🎤 ' + display;
+
+      const heard = display.toLowerCase();
+
+      if (strict) {
+        if (matchScore(heard, expected) > 0.7) {
+          advanceFromMatcher();
+        }
+      } else {
+        const wordCount = accumulatedFinal.trim().split(/\s+/).filter(Boolean).length;
+        const expectedWordCount = expected.split(/\s+/).filter(Boolean).length;
+        if (wordCount >= Math.max(2, expectedWordCount * 0.4)) {
+          advanceFromMatcher();
+        }
+      }
+    }
+  };
+}
+
+function advanceFromMatcher() {
+  currentLineMatcher = null;
+  setTimeout(() => {
+    currentLineIdx++;
+    advanceLine();
+  }, 400);
+}
+
+function matchScore(heard, expected) {
+  // Simple word-overlap score
+  const heardWords = new Set(heard.replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean));
+  const expectedWords = expected.replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean);
+  if (expectedWords.length === 0) return 1;
+  let matched = 0;
+  expectedWords.forEach(w => { if (heardWords.has(w)) matched++; });
+  return matched / expectedWords.length;
+}
+
+// ============ Rehearsal controls ============
+document.getElementById('next-line').addEventListener('click', () => {
+  speechSynthesis.cancel();
+  currentLineMatcher = null;
+  currentLineIdx++;
+  advanceLine();
+});
+
+document.getElementById('repeat-line').addEventListener('click', () => {
+  speechSynthesis.cancel();
+  currentLineMatcher = null;
+  // Find previous spoken (non-mine) line
+  let i = currentLineIdx - 1;
+  while (i >= 0 && (parsedScript[i].isDirection || parsedScript[i].character === myCharacter)) i--;
+  if (i >= 0) {
+    currentLineIdx = i;
+    advanceLine();
+  }
+});
+
+document.getElementById('restart').addEventListener('click', () => {
+  speechSynthesis.cancel();
+  currentLineMatcher = null;
+  currentLineIdx = 0;
+  document.querySelectorAll('.rehearsal-line, .stage-direction').forEach(el => {
+    el.classList.remove('done');
+  });
+  advanceLine();
+});
+
+document.getElementById('exit-rehearsal').addEventListener('click', () => {
+  speechSynthesis.cancel();
+  stopContinuousListening();
+  currentLineMatcher = null;
+  showStep('step-character');
+});
+
+// ============ Step navigation ============
+document.getElementById('back-to-input').addEventListener('click', () => showStep('step-input'));
+document.getElementById('back-to-edit').addEventListener('click', () => showStep('step-edit'));
+
+function showStep(id) {
+  ['step-input', 'step-edit', 'step-character', 'step-rehearse'].forEach(s => {
+    document.getElementById(s).classList.toggle('hidden', s !== id);
+  });
+}
+
+// Initial voice load
+populateVoices();
+</script>
+</body>
+</html>

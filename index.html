@@ -258,6 +258,7 @@
   <div class="controls-row" style="margin-top: 16px;">
     <label>Voice for others:
       <select id="voice-select"></select>
+      <button class="secondary" onclick="populateVoices()" style="margin-left:8px;padding:5px 10px;font-size:0.9em;">Reload voices</button>
     </label>
     <label>
       <input type="checkbox" id="strict-mode"> Strict matching (must say line correctly)
@@ -594,6 +595,10 @@ function populateVoices() {
   voices = speechSynthesis.getVoices();
   const select = document.getElementById('voice-select');
   select.innerHTML = '';
+  if (voices.length === 0) {
+    // Voices not loaded yet, will retry when onvoiceschanged fires
+    return;
+  }
   // Prefer English voices but show all
   const sorted = [...voices].sort((a, b) => {
     const aEn = a.lang.startsWith('en') ? 0 : 1;
@@ -607,7 +612,11 @@ function populateVoices() {
     select.appendChild(opt);
   });
 }
-speechSynthesis.onvoiceschanged = populateVoices;
+// Load voices immediately and also listen for async load
+populateVoices();
+if (speechSynthesis.onvoiceschanged !== undefined) {
+  speechSynthesis.onvoiceschanged = populateVoices;
+}
 
 function getVoiceForCharacter(char) {
   // Assign a voice per character so they sound different
@@ -774,17 +783,29 @@ function advanceLine() {
 }
 
 function speakLine(text, character, onDone) {
-  document.getElementById('listening-status').textContent = '';
+  document.getElementById('listening-status').textContent = character ? `🔊 ${character} is speaking...` : '🔊';
   const utter = new SpeechSynthesisUtterance(text);
   if (character) {
     const v = getVoiceForCharacter(character);
-    if (v) utter.voice = v;
+    if (v) {
+      utter.voice = v;
+    }
   }
   utter.rate = 0.95;
-  utter.onend = onDone;
-  utter.onerror = onDone;
+  utter.onend = () => {
+    document.getElementById('listening-status').textContent = '';
+    if (onDone) onDone();
+  };
+  utter.onerror = (e) => {
+    console.error('Speech error:', e);
+    document.getElementById('listening-status').textContent = '⚠️ Speech error';
+    if (onDone) onDone();
+  };
   speechSynthesis.cancel();
-  speechSynthesis.speak(utter);
+  // Small delay to ensure cancel completes
+  setTimeout(() => {
+    speechSynthesis.speak(utter);
+  }, 50);
 }
 
 function listenForLine(expectedText) {

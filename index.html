@@ -559,6 +559,7 @@ const ACTIVE_KEY = 'lineup_active';
 let characterVoiceAssignments = {}; // { 'CHAR_NAME': voiceIndex } — system TTS
 let piperVoiceAssignments = {};      // { 'CHAR_NAME': piperVoiceKey }
 let piperLib = null;
+const piperCache = new Map();        // lineIdx -> Promise<Blob> (prefetch cache)
 async function getPiperLib() {
   if (!piperLib) {
     piperLib = await import('https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1.0.4/dist/piper-tts-web.js');
@@ -1352,8 +1353,12 @@ function stopContinuousListening() {
 document.getElementById('start-rehearsal').addEventListener('click', () => {
   currentLineIdx = 0;
   characterVoiceMap = {};
+  piperCache.clear();
   renderScriptDisplay();
   showStep('step-rehearse');
+
+  // Pre-generate the first other-character line immediately so it's ready
+  if (document.getElementById('use-piper')?.checked && piperReady) prefetchNextPiperLine(-1);
 
   // Warm up speech synthesis with a silent utterance so the first real line plays
   // (Chrome and some others swallow the first speak() after page load otherwise)
@@ -1476,36 +1481,68 @@ function advanceLine() {
   }
 }
 
+// Generate (or return cached) audio blob for a given script line index.
+function piperPredict(lineIdx) {
+  if (piperCache.has(lineIdx)) return piperCache.get(lineIdx);
+  const line = parsedScript[lineIdx];
+  if (!line) return Promise.resolve(null);
+  const voiceKey = line.character
+    ? (piperVoiceAssignments[line.character] || getDefaultPiperKey())
+    : getDefaultPiperKey();
+  const voiceDef = getPiperVoiceByKey(voiceKey);
+  const p = getPiperLib().then(lib => {
+    if (lib.TtsSession._instance && lib.TtsSession._instance.voiceId !== voiceDef.id) {
+      lib.TtsSession._instance = null;
+    }
+    return lib.predict({ voiceId: voiceDef.id, text: line.text });
+  });
+  piperCache.set(lineIdx, p);
+  return p;
+}
+
+// Kick off generation for the next other-character line so it's ready when needed.
+function prefetchNextPiperLine(fromIdx) {
+  if (!document.getElementById('use-piper')?.checked || !piperReady) return;
+  for (let i = fromIdx + 1; i < parsedScript.length; i++) {
+    const line = parsedScript[i];
+    if (!line.isDirection && line.character !== myCharacter) {
+      piperPredict(i);
+      return;
+    }
+  }
+}
+
 function speakLine(text, character, onDone) {
   const usePiper = document.getElementById('use-piper')?.checked;
 
   if (usePiper && piperReady) {
-    const voiceKey = character
-      ? (piperVoiceAssignments[character] || getDefaultPiperKey())
-      : getDefaultPiperKey();
-    const voiceDef = getPiperVoiceByKey(voiceKey);
-    document.getElementById('listening-status').textContent = character ? `🔊 ${character} is speaking...` : '🔊';
-    getPiperLib().then(lib => {
-      // The library is a singleton — reset it when the model changes so it re-initialises from cache
-      if (lib.TtsSession._instance && lib.TtsSession._instance.voiceId !== voiceDef.id) {
-        lib.TtsSession._instance = null;
-      }
-      return lib.predict({ voiceId: voiceDef.id, text });
-    }).then(wavBlob => {
-      const audio = new Audio(URL.createObjectURL(wavBlob));
+    const lineIdx = currentLineIdx;
+    const statusEl = document.getElementById('listening-status');
+    statusEl.textContent = piperCache.has(lineIdx) ? (character ? `🔊 ${character} is speaking...` : '🔊') : '⏳ Generating...';
+    piperPredict(lineIdx).then(wavBlob => {
+      statusEl.textContent = character ? `🔊 ${character} is speaking...` : '🔊';
+      const url = URL.createObjectURL(wavBlob);
+      const audio = new Audio(url);
       audio.onended = () => {
-        document.getElementById('listening-status').textContent = '';
-        URL.revokeObjectURL(audio.src);
+        statusEl.textContent = '';
+        URL.revokeObjectURL(url);
         if (onDone) onDone();
       };
       audio.onerror = () => {
-        document.getElementById('listening-status').textContent = '⚠️ Audio error';
+        statusEl.textContent = '⚠️ Audio error';
         if (onDone) onDone();
       };
-      audio.play();
+      const playPromise = audio.play();
+      if (playPromise) playPromise.catch(err => {
+        console.error('Audio play blocked:', err);
+        statusEl.textContent = '⚠️ Audio blocked — tap screen and retry';
+        if (onDone) onDone();
+      });
+      // Start generating the next other-character line while this one plays
+      prefetchNextPiperLine(lineIdx);
     }).catch(e => {
       console.error('Piper error:', e);
-      document.getElementById('listening-status').textContent = '⚠️ Piper error';
+      statusEl.textContent = '⚠️ Piper error: ' + (e.message || e);
       if (onDone) onDone();
     });
     return;
@@ -1546,6 +1583,8 @@ function speakLine(text, character, onDone) {
 }
 
 function listenForLine(expectedText) {
+  // While user is speaking, pre-generate the next other-character line
+  prefetchNextPiperLine(currentLineIdx);
   document.getElementById('listening-status').innerHTML = ' Listening<span class="listening-indicator"></span>';
   if (!recognition) {
     // No speech recognition; user must use Skip button

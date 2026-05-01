@@ -679,9 +679,10 @@ function renderCharacterList() {
 function populateVoices() {
   voices = speechSynthesis.getVoices();
   const select = document.getElementById('voice-select');
+  if (!select) return;
   select.innerHTML = '';
   if (voices.length === 0) {
-    // Voices not loaded yet, will retry when onvoiceschanged fires
+    select.innerHTML = '<option value="">Loading voices...</option>';
     return;
   }
   // Prefer English voices but show all
@@ -697,11 +698,21 @@ function populateVoices() {
     select.appendChild(opt);
   });
 }
-// Load voices immediately and also listen for async load
-populateVoices();
+// Robust voice loading: set handler first, then call getVoices
 if (speechSynthesis.onvoiceschanged !== undefined) {
   speechSynthesis.onvoiceschanged = populateVoices;
 }
+// Call getVoices() which triggers onvoiceschanged in Chrome
+populateVoices();
+// Some browsers need a nudge - keep trying for a few seconds
+let voiceRetryCount = 0;
+const voiceInterval = setInterval(() => {
+  if (voices.length > 0 || voiceRetryCount++ > 20) {
+    clearInterval(voiceInterval);
+    return;
+  }
+  populateVoices();
+}, 250);
 
 function getVoiceForCharacter(char) {
   // Assign a voice per character so they sound different

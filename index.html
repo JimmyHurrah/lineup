@@ -298,12 +298,13 @@
     <button onclick="submitTextLine()" style="padding:8px 16px;margin-left:5px;">Submit</button>
   </div>
   <div id="script-display"></div>
-  <div class="controls-row" style="margin-top: 16px;">
+  <div id="rehearse-controls" style="position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,0.95);padding:12px;text-align:center;border-top:1px solid #e0e0e0;z-index:1000;box-shadow:0 -2px 10px rgba(0,0,0,0.1);">
     <button id="next-line">Skip / Next</button>
     <button id="repeat-line" class="secondary">Repeat last line</button>
     <button id="restart" class="secondary">Restart from top</button>
     <button id="exit-rehearsal" class="danger">Exit</button>
   </div>
+  <div style="height:60px;"></div> <!-- Spacer so content doesn't hide behind controls -->
 </div>
 
 <script>
@@ -966,20 +967,21 @@ document.getElementById('start-rehearsal').addEventListener('click', () => {
 
   // Check if text mode is enabled (only as last resort)
   const textMode = document.getElementById('text-mode')?.checked;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   if (textMode) {
     // User explicitly chose text mode
     const noMicFallback = document.getElementById('no-mic-fallback');
     if (noMicFallback) noMicFallback.style.display = 'block';
     advanceLine();
-  } else if (!recognition && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    // Speech recognition not available - show message but still try to advance
-    console.warn('Speech recognition not available on this browser/device');
+  } else if (!SR) {
+    // Speech recognition API not available at all
+    console.warn('Speech recognition API not available in this browser');
     const status = document.getElementById('listening-status');
-    if (status) status.textContent = '⚠️ Speech recognition not available - use Skip button';
+    if (status) status.textContent = '⚠️ Speech recognition not supported - use Skip button';
     advanceLine();
   } else if (!micPermissionGranted && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    // Show mic permission button for iOS
+    // Show mic permission button for iOS/Android - must start recognition from user gesture
     const micDiv = document.getElementById('mic-permission');
     if (micDiv) micDiv.style.display = 'block';
     if (micDiv) micDiv.querySelector('button').onclick = () => {

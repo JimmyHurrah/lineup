@@ -262,6 +262,12 @@
 <div class="step hidden" id="step-character">
   <h2>3. Which character are you?</h2>
   <div class="character-list" id="character-list"></div>
+
+  <div id="voice-assignments" style="margin-top:20px;display:none;">
+    <h3 style="font-size:1em;">Voice assignments for other characters:</h3>
+    <div id="character-voices"></div>
+  </div>
+
   <div class="controls-row" style="margin-top: 16px;">
     <div id="speech-init" style="margin-bottom:10px;padding:10px;background:#fff3cd;border-radius:8px;display:none;">
       <strong>⚠️ Speech initialization needed</strong>
@@ -269,9 +275,6 @@
       <button onclick="initSpeech()" style="padding:8px 16px;">🎤 Initialize Speech Engine</button>
       <span id="voice-status" style="margin-left:10px;font-size:0.9em;"></span>
     </div>
-    <label>Voice for others:
-      <select id="voice-select"></select>
-    </label>
     <label>
       <input type="checkbox" id="strict-mode"> Strict matching (must say line correctly)
     </label>
@@ -311,6 +314,7 @@ let characterVoiceMap = {};
 // ============ LocalStorage: Save/Load Plays ============
 const STORAGE_KEY = 'lineup_plays';
 const ACTIVE_KEY = 'lineup_active';
+let characterVoiceAssignments = {}; // { 'CHAR_NAME': voiceIndex }
 
 const SAMPLE_PLAY = `ALICE: Good morning, Bob. How are you today?
 BOB: I'm doing great, Alice! The weather is beautiful.
@@ -334,7 +338,13 @@ function getSavedPlays() {
 function savePlay(name, scriptText) {
   const plays = getSavedPlays();
   const existing = plays.findIndex(p => p.name === name);
-  const play = { name, scriptText, date: new Date().toISOString() };
+  const play = {
+    name,
+    scriptText,
+    voiceAssignments: characterVoiceAssignments,
+    myCharacter,
+    date: new Date().toISOString()
+  };
   if (existing >= 0) {
     plays[existing] = play;
   } else {
@@ -358,6 +368,13 @@ function loadPlay(name) {
   if (!play) return;
   localStorage.setItem(ACTIVE_KEY, name);
   document.getElementById('script-text').value = play.scriptText;
+  // Load saved voice assignments if available
+  if (play.voiceAssignments) {
+    characterVoiceAssignments = play.voiceAssignments;
+  }
+  if (play.myCharacter) {
+    myCharacter = play.myCharacter;
+  }
   showStep('step-edit');
 }
 
@@ -605,6 +622,8 @@ document.getElementById('parse-script').addEventListener('click', () => {
     return;
   }
   characters = [...new Set(parsedScript.filter(l => !l.isDirection).map(l => l.character))];
+  // Reset voice assignments for new script
+  characterVoiceAssignments = {};
   renderCharacterList();
   populateVoices();
   showStep('step-character');
@@ -693,8 +712,44 @@ function renderCharacterList() {
       chip.classList.add('selected');
       myCharacter = c;
       document.getElementById('start-rehearsal').disabled = false;
+      renderCharacterVoiceAssignments();
     });
     container.appendChild(chip);
+  });
+}
+
+function renderCharacterVoiceAssignments() {
+  const container = document.getElementById('character-voices');
+  const parentDiv = document.getElementById('voice-assignments');
+  if (!myCharacter || !container || !parentDiv) return;
+
+  const others = characters.filter(c => c !== myCharacter);
+  if (others.length === 0) {
+    parentDiv.style.display = 'none';
+    return;
+  }
+
+  parentDiv.style.display = 'block';
+  container.innerHTML = '';
+  others.forEach(c => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;margin:8px 0;gap:10px;';
+    row.innerHTML = `<label style="min-width:120px;">${c}:</label>`;
+    const sel = document.createElement('select');
+    sel.id = `voice-for-${c}`;
+    // Populate with available voices
+    voices.forEach((v, i) => {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = `${v.name} (${v.lang})`;
+      if (characterVoiceAssignments[c] === i) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.onchange = () => {
+      characterVoiceAssignments[c] = parseInt(sel.value);
+    };
+    row.appendChild(sel);
+    container.appendChild(row);
   });
 }
 
@@ -770,9 +825,17 @@ if (document.readyState === 'loading') {
 }
 
 function getVoiceForCharacter(char) {
-  // Assign a voice per character so they sound different
+  // Use saved voice assignment if available
+  if (characterVoiceAssignments[char] !== undefined) {
+    const voice = voices[characterVoiceAssignments[char]];
+    if (voice) {
+      characterVoiceMap[char] = voice;
+      return voice;
+    }
+  }
+  // Fallback: assign a voice per character so they sound different
   if (characterVoiceMap[char]) return characterVoiceMap[char];
-  const baseIdx = parseInt(document.getElementById('voice-select').value) || 0;
+  const baseIdx = 0;
   const baseVoice = voices[baseIdx];
   const lang = baseVoice ? baseVoice.lang : 'en-US';
   const sameLang = voices.filter(v => v.lang === lang);

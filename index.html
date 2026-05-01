@@ -1394,14 +1394,23 @@ function speakLine(text, character, onDone) {
     }
   }
   utter.rate = 0.95;
-  utter.onend = () => {
+
+  // Chrome fires onerror('interrupted') on an utterance that already fired onend
+  // when cancel() is called for the next line. Guard against the double-advance.
+  let done = false;
+  const advance = () => {
+    if (done) return;
+    done = true;
     document.getElementById('listening-status').textContent = '';
     if (onDone) onDone();
   };
+  utter.onend = advance;
   utter.onerror = (e) => {
-    console.error('Speech error:', e);
-    document.getElementById('listening-status').textContent = '⚠️ Speech error';
-    if (onDone) onDone();
+    if (e.error !== 'interrupted') {
+      console.error('Speech error:', e);
+      document.getElementById('listening-status').textContent = '⚠️ Speech error';
+    }
+    advance();
   };
   speechSynthesis.cancel();
   setTimeout(() => {

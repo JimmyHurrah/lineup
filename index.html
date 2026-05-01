@@ -184,6 +184,13 @@
 <div class="step" id="step-input">
   <h2>1. Load your script</h2>
 
+  <div id="saved-plays" style="margin-bottom:20px;">
+    <h3 style="font-size:1em;margin-bottom:8px;">Saved Plays</h3>
+    <div id="saved-plays-list"></div>
+    <input type="text" id="play-name" placeholder="Play name (for saving)" style="padding:8px;border-radius:8px;border:1px solid #ccc;width:200px;">
+    <button id="save-current-play" class="secondary" style="font-size:0.9em;">💾 Save current script</button>
+  </div>
+
   <div style="margin-bottom: 12px;">
     <label>Script language:
       <select id="lang-select">
@@ -290,6 +297,67 @@ let currentLineIdx = 0;
 let recognition = null;
 let voices = [];
 let characterVoiceMap = {};
+
+// ============ LocalStorage: Save/Load Plays ============
+const STORAGE_KEY = 'lineup_plays';
+const ACTIVE_KEY = 'lineup_active';
+
+function getSavedPlays() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+  } catch { return []; }
+}
+
+function savePlay(name, scriptText) {
+  const plays = getSavedPlays();
+  const existing = plays.findIndex(p => p.name === name);
+  const play = { name, scriptText, date: new Date().toISOString() };
+  if (existing >= 0) {
+    plays[existing] = play;
+  } else {
+    plays.unshift(play);
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(plays));
+  renderSavedPlays();
+}
+
+function deletePlay(name) {
+  const plays = getSavedPlays().filter(p => p.name !== name);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(plays));
+  if (localStorage.getItem(ACTIVE_KEY) === name) {
+    localStorage.removeItem(ACTIVE_KEY);
+  }
+  renderSavedPlays();
+}
+
+function loadPlay(name) {
+  const play = getSavedPlays().find(p => p.name === name);
+  if (!play) return;
+  localStorage.setItem(ACTIVE_KEY, name);
+  document.getElementById('script-text').value = play.scriptText;
+  showStep('step-edit');
+}
+
+function renderSavedPlays() {
+  const container = document.getElementById('saved-plays-list');
+  const plays = getSavedPlays();
+  if (plays.length === 0) {
+    container.innerHTML = '<p class="help-text">No saved plays yet. Load or paste a script and it will appear here.</p>';
+    return;
+  }
+  container.innerHTML = plays.map(p => `
+    <div class="saved-play" style="display:flex;justify-content:space-between;align-items:center;padding:10px;margin:5px 0;background:#f9f9f9;border-radius:8px;">
+      <div>
+        <strong>${escapeHtml(p.name)}</strong>
+        <span class="help-text" style="margin-left:10px;">${new Date(p.date).toLocaleDateString()}</span>
+      </div>
+      <div>
+        <button onclick="loadPlay('${escapeHtml(p.name)}')" style="padding:5px 10px;font-size:0.9em;">Load</button>
+        <button onclick="deletePlay('${escapeHtml(p.name)}')" class="danger" style="padding:5px 10px;font-size:0.9em;margin-left:5px;">Delete</button>
+      </div>
+    </div>
+  `).join('');
+}
 
 // ============ Tab switching ============
 document.querySelectorAll('.tab-button').forEach(btn => {
@@ -517,6 +585,23 @@ document.getElementById('parse-script').addEventListener('click', () => {
   renderCharacterList();
   populateVoices();
   showStep('step-character');
+});
+
+// ============ Save current play ============
+document.getElementById('save-current-play').addEventListener('click', () => {
+  const name = document.getElementById('play-name').value.trim();
+  const scriptText = document.getElementById('script-text').value.trim();
+  if (!name) {
+    alert('Please enter a name for the play.');
+    return;
+  }
+  if (!scriptText) {
+    alert('No script to save. Please load or paste a script first.');
+    return;
+  }
+  savePlay(name, scriptText);
+  document.getElementById('play-name').value = '';
+  alert(`"${name}" saved!`);
 });
 
 function parseScript(text) {
@@ -918,6 +1003,18 @@ function showStep(id) {
 
 // Initial voice load
 populateVoices();
+
+// Initial saved plays load
+renderSavedPlays();
+
+// Auto-load last active play if exists
+const activePlay = localStorage.getItem(ACTIVE_KEY);
+if (activePlay) {
+  const play = getSavedPlays().find(p => p.name === activePlay);
+  if (play) {
+    document.getElementById('script-text').value = play.scriptText;
+  }
+}
 </script>
 </body>
 </html>

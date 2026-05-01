@@ -265,7 +265,7 @@
   <div class="controls-row" style="margin-top: 16px;">
     <label>Voice for others:
       <select id="voice-select"></select>
-      <button class="secondary" onclick="populateVoices()" style="margin-left:8px;padding:5px 10px;font-size:0.9em;">Reload voices</button>
+      <button class="secondary" onclick="loadVoices()" style="margin-left:8px;padding:5px 10px;font-size:0.9em;">Load Voices</button>
     </label>
     <label>
       <input type="checkbox" id="strict-mode"> Strict matching (must say line correctly)
@@ -682,37 +682,37 @@ function populateVoices() {
   if (!select) return;
   select.innerHTML = '';
   if (voices.length === 0) {
-    select.innerHTML = '<option value="">Loading voices...</option>';
+    select.innerHTML = '<option value="">No voices found - try clicking "Load Voices" button</option>';
     return;
   }
-  // Prefer English voices but show all
   const sorted = [...voices].sort((a, b) => {
     const aEn = a.lang.startsWith('en') ? 0 : 1;
     const bEn = b.lang.startsWith('en') ? 0 : 1;
     return aEn - bEn || a.name.localeCompare(b.name);
   });
-  sorted.forEach((v, i) => {
+  sorted.forEach((v) => {
     const opt = document.createElement('option');
     opt.value = voices.indexOf(v);
     opt.textContent = `${v.name} (${v.lang})`;
     select.appendChild(opt);
   });
 }
-// Robust voice loading: set handler first, then call getVoices
-if (speechSynthesis.onvoiceschanged !== undefined) {
-  speechSynthesis.onvoiceschanged = populateVoices;
-}
-// Call getVoices() which triggers onvoiceschanged in Chrome
-populateVoices();
-// Some browsers need a nudge - keep trying for a few seconds
-let voiceRetryCount = 0;
-const voiceInterval = setInterval(() => {
-  if (voices.length > 0 || voiceRetryCount++ > 20) {
-    clearInterval(voiceInterval);
-    return;
-  }
+
+// Load voices - Chrome needs this triggered
+function loadVoices() {
   populateVoices();
-}, 250);
+  if (voices.length === 0 && speechSynthesis.onvoiceschanged !== undefined) {
+    speechSynthesis.onvoiceschanged = populateVoices;
+    speechSynthesis.getVoices(); // Trigger the event
+  }
+}
+
+// Load voices on DOM ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', loadVoices);
+} else {
+  loadVoices();
+}
 
 function getVoiceForCharacter(char) {
   // Assign a voice per character so they sound different

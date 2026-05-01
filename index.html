@@ -205,6 +205,7 @@
     <button class="tab-button active" data-tab="camera">📷 Camera</button>
     <button class="tab-button" data-tab="upload">🖼️ Upload photo</button>
     <button class="tab-button" data-tab="paste">✏️ Paste text</button>
+    <button class="tab-button" data-tab="url">🔗 URL</button>
   </div>
 
   <div id="tab-camera" class="tab-content">
@@ -228,6 +229,13 @@
   <div id="tab-paste" class="tab-content hidden">
     <textarea class="script-editor" id="paste-area" placeholder="Paste your script here. Format like:&#10;&#10;BOB: So why are you called fool?&#10;FOOL: That's just my name.&#10;SUSAN: I never heard of anyone called Fool before."></textarea>
     <button id="use-pasted">Use this text</button>
+  </div>
+
+  <div id="tab-url" class="tab-content hidden">
+    <input type="url" id="url-input" placeholder="https://example.com/script-image.jpg or document URL" style="width:100%;padding:10px;margin-bottom:10px;border-radius:8px;border:1px solid #ccc;">
+    <button id="fetch-url">Fetch & extract text</button>
+    <div id="url-preview"></div>
+    <p class="help-text">Enter a URL to an image (PNG/JPG) or a text document (TXT/PDF). Images will use OCR; text files will be loaded directly.</p>
   </div>
 
   <div id="ocr-progress" class="progress hidden"></div>
@@ -393,6 +401,64 @@ document.getElementById('use-pasted').addEventListener('click', () => {
   }
   document.getElementById('script-text').value = text;
   showStep('step-edit');
+});
+
+// ============ URL Fetch ============
+document.getElementById('fetch-url').addEventListener('click', async () => {
+  const url = document.getElementById('url-input').value.trim();
+  if (!url) {
+    alert('Please enter a URL.');
+    return;
+  }
+
+  const preview = document.getElementById('url-preview');
+  preview.innerHTML = 'Fetching...';
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch: ' + response.status);
+
+    const contentType = response.headers.get('content-type') || '';
+    const urlLower = url.toLowerCase();
+
+    if (contentType.includes('image') || /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(urlLower)) {
+      // Image: use OCR
+      const blob = await response.blob();
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const imgSrc = reader.result;
+        preview.innerHTML = `<img src="${imgSrc}" class="preview-img" alt="Fetched image">`;
+        preview.innerHTML += '<br>Running OCR...';
+
+        const ocrLang = document.getElementById('lang-select').value.split('|')[0];
+        const worker = await Tesseract.createWorker(ocrLang, 1, {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              preview.innerHTML = `<img src="${imgSrc}" class="preview-img" alt="Fetched image"><br>Running OCR... ${Math.round(m.progress * 100)}%`;
+            }
+          }
+        });
+        const { data: { text } } = await worker.recognize(imgSrc);
+        await worker.terminate();
+        document.getElementById('script-text').value = cleanupOcr(text);
+        preview.innerHTML = '<strong>Text extracted! Redirecting...</strong>';
+        setTimeout(() => showStep('step-edit'), 500);
+      };
+      reader.readAsDataURL(blob);
+    } else if (contentType.includes('text') || /\.(txt|md)$/i.test(urlLower)) {
+      // Plain text
+      const text = await response.text();
+      document.getElementById('script-text').value = text;
+      preview.innerHTML = '<strong>Text loaded! Redirecting...</strong>';
+      setTimeout(() => showStep('step-edit'), 500);
+    } else if (urlLower.endsWith('.pdf')) {
+      preview.innerHTML = 'PDF support coming soon. Please download the PDF and upload as images, or copy-paste the text.';
+    } else {
+      preview.innerHTML = 'Unsupported file type. Please use an image (JPG/PNG) or text file (TXT).';
+    }
+  } catch (err) {
+    preview.innerHTML = 'Error: ' + err.message + '<br><small>Note: CORS may block fetching from some sites.</small>';
+  }
 });
 
 // ============ OCR ============

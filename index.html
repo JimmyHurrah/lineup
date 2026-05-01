@@ -263,10 +263,14 @@
   <h2>3. Which character are you?</h2>
   <div class="character-list" id="character-list"></div>
   <div class="controls-row" style="margin-top: 16px;">
+    <div id="speech-init" style="margin-bottom:10px;padding:10px;background:#fff3cd;border-radius:8px;display:none;">
+      <strong>⚠️ Speech initialization needed</strong>
+      <p style="margin:5px 0;font-size:0.9em;">Click the button below to enable speech features (required in Chrome/Edge)</p>
+      <button onclick="initSpeech()" style="padding:8px 16px;">🎤 Initialize Speech Engine</button>
+      <span id="voice-status" style="margin-left:10px;font-size:0.9em;"></span>
+    </div>
     <label>Voice for others:
       <select id="voice-select"></select>
-      <button class="secondary" onclick="initSpeech()" style="margin-left:8px;padding:5px 10px;font-size:0.9em;">Initialize Speech</button>
-      <span id="voice-status" style="margin-left:10px;font-size:0.9em;color:#666;"></span>
     </label>
     <label>
       <input type="checkbox" id="strict-mode"> Strict matching (must say line correctly)
@@ -681,16 +685,20 @@ function populateVoices() {
   voices = speechSynthesis.getVoices();
   const select = document.getElementById('voice-select');
   const status = document.getElementById('voice-status');
+  const initDiv = document.getElementById('speech-init');
   if (!select) return;
   select.innerHTML = '';
 
   if (voices.length === 0) {
     select.innerHTML = '<option value="">No voices loaded yet</option>';
-    if (status) status.textContent = 'Click "Initialize Speech" below';
+    if (status) status.textContent = 'Speech not initialized';
+    if (initDiv) initDiv.style.display = 'block';
     return;
   }
 
-  if (status) status.textContent = `Loaded ${voices.length} voices`;
+  // Voices loaded successfully, hide init message
+  if (initDiv) initDiv.style.display = 'none';
+  if (status) status.textContent = `✓ ${voices.length} voices loaded`;
   const sorted = [...voices].sort((a, b) => {
     const aEn = a.lang.startsWith('en') ? 0 : 1;
     const bEn = b.lang.startsWith('en') ? 0 : 1;

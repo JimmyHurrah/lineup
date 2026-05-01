@@ -265,7 +265,7 @@
   <div class="controls-row" style="margin-top: 16px;">
     <label>Voice for others:
       <select id="voice-select"></select>
-      <button class="secondary" onclick="forceLoadVoices()" style="margin-left:8px;padding:5px 10px;font-size:0.9em;">Load Voices</button>
+      <button class="secondary" onclick="initSpeech()" style="margin-left:8px;padding:5px 10px;font-size:0.9em;">Initialize Speech</button>
       <span id="voice-status" style="margin-left:10px;font-size:0.9em;color:#666;"></span>
     </label>
     <label>
@@ -683,12 +683,14 @@ function populateVoices() {
   const status = document.getElementById('voice-status');
   if (!select) return;
   select.innerHTML = '';
-  if (status) status.textContent = `Found ${voices.length} voices`;
 
   if (voices.length === 0) {
-    select.innerHTML = '<option value="">No voices found - try "Load Voices" button</option>';
+    select.innerHTML = '<option value="">No voices loaded yet</option>';
+    if (status) status.textContent = 'Click "Initialize Speech" below';
     return;
   }
+
+  if (status) status.textContent = `Loaded ${voices.length} voices`;
   const sorted = [...voices].sort((a, b) => {
     const aEn = a.lang.startsWith('en') ? 0 : 1;
     const bEn = b.lang.startsWith('en') ? 0 : 1;
@@ -702,49 +704,43 @@ function populateVoices() {
   });
 }
 
-// Force Chrome to load voices by speaking silently
-function forceLoadVoices() {
+// Initialize speech - must be called from user gesture in Chrome
+function initSpeech() {
   const status = document.getElementById('voice-status');
-  if (status) status.textContent = 'Loading voices...';
+  if (status) status.textContent = 'Initializing...';
 
-  // Chrome requires a speech attempt to load voices
-  const utter = new SpeechSynthesisUtterance(' ');
-  utter.volume = 0;
+  // Method 1: Try getVoices with onvoiceschanged
+  if (speechSynthesis.onvoiceschanged !== undefined) {
+    speechSynthesis.onvoiceschanged = () => {
+      populateVoices();
+    };
+  }
+
+  // Method 2: Speak something to force Chrome to load voices
+  const utter = new SpeechSynthesisUtterance('Hello');
+  utter.volume = 0.01; // Nearly silent but counts as user gesture
   utter.onend = () => {
+    speechSynthesis.cancel();
     populateVoices();
-    if (voices.length === 0) {
-      // Try again with onvoiceschanged
-      if (speechSynthesis.onvoiceschanged !== undefined) {
-        speechSynthesis.onvoiceschanged = () => {
-          populateVoices();
-        };
-      }
-      speechSynthesis.getVoices();
-    }
   };
   utter.onerror = () => {
     populateVoices();
   };
   speechSynthesis.speak(utter);
+
+  // Method 3: Direct call
+  speechSynthesis.getVoices();
+  setTimeout(populateVoices, 100);
+  setTimeout(populateVoices, 500);
 }
 
-// Load voices on DOM ready
-function loadVoices() {
-  populateVoices();
-  if (voices.length === 0) {
-    // Set up the event listener for async loading
-    if (speechSynthesis.onvoiceschanged !== undefined) {
-      speechSynthesis.onvoiceschanged = populateVoices;
-    }
-    // Try to get voices
-    speechSynthesis.getVoices();
-  }
-}
-
+// Auto-load on DOM ready (works in Firefox, may not work in Chrome)
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', loadVoices);
+  document.addEventListener('DOMContentLoaded', () => {
+    speechSynthesis.getVoices();
+  });
 } else {
-  loadVoices();
+  speechSynthesis.getVoices();
 }
 
 function getVoiceForCharacter(char) {

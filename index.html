@@ -882,19 +882,29 @@ function requestMicPermission() {
 
   if (status) status.textContent = 'Requesting mic access...';
 
-  navigator.mediaDevices.getUserMedia({ audio: true })
-    .then(() => {
-      micPermissionGranted = true;
-      if (micDiv) micDiv.style.display = 'none';
-      if (status) status.textContent = '✓ Mic ready';
-      // Now start recognition
-      recognition = setupRecognition();
-      startContinuousListening();
-    })
-    .catch((err) => {
-      if (status) status.textContent = 'Mic access denied';
-      alert('Microphone access is needed for speech recognition. Please enable it in Settings > Safari > Microphone (on iOS) or browser settings.');
-    });
+  // On iOS, we need getUserMedia to trigger microphone permission
+  // On Android Chrome, speech recognition has its own permission flow
+  if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(() => {
+        micPermissionGranted = true;
+        if (micDiv) micDiv.style.display = 'none';
+        if (status) status.textContent = '✓ Mic ready';
+        recognition = setupRecognition();
+        startContinuousListening();
+      })
+      .catch((err) => {
+        if (status) status.textContent = 'Mic access denied';
+        alert('Microphone access is needed. Please enable it in Settings > Safari > Microphone.');
+      });
+  } else {
+    // Android Chrome: just start recognition and let it trigger its own permission
+    micPermissionGranted = true;
+    if (micDiv) micDiv.style.display = 'none';
+    if (status) status.textContent = '✓ Starting...';
+    recognition = setupRecognition();
+    startContinuousListening();
+  }
 }
 
 function setupRecognition() {

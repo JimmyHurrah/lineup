@@ -539,7 +539,6 @@
   <div class="rehearse-spacer"></div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1.0.4/dist/piper-tts.js"></script>
 <script>
 // ============ State ============
 let capturedImages = [];  // data URLs
@@ -555,7 +554,14 @@ let characterVoiceMap = {};
 const STORAGE_KEY = 'lineup_plays';
 const ACTIVE_KEY = 'lineup_active';
 let characterVoiceAssignments = {}; // { 'CHAR_NAME': voiceIndex } — system TTS
-let piperVoiceAssignments = {};      // { 'CHAR_NAME': piperVoiceId }
+let piperVoiceAssignments = {};      // { 'CHAR_NAME': piperVoiceKey }
+let piperLib = null;
+async function getPiperLib() {
+  if (!piperLib) {
+    piperLib = await import('https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1.0.4/dist/piper-tts-web.js');
+  }
+  return piperLib;
+}
 
 const SAMPLE_PLAY = `ALICE: Good morning, Bob. How are you today?
 BOB: I'm doing great, Alice! The weather is beautiful.
@@ -1115,36 +1121,21 @@ if (document.readyState === 'loading') {
 }
 
 // ============ Piper TTS Engine ============
-// Each entry has a unique `key` (used for assignments), a model `id` (download unit),
-// an optional `speakerId` for multi-speaker models, and display metadata.
-// English uses en_US-arctic-medium (18 speakers, one download) for free male/female variety.
-
 const PIPER_VOICES = [
-  // English – four personas from one multi-speaker model (~63 MB, one download)
-  { key: 'en-f1', id: 'en_US-arctic-medium', speakerId: 2,    label: 'English – Female',    lang: 'en' },
-  { key: 'en-m1', id: 'en_US-arctic-medium', speakerId: 0,    label: 'English – Male',      lang: 'en' },
-  { key: 'en-f2', id: 'en_US-arctic-medium', speakerId: 4,    label: 'English – Female 2',  lang: 'en' },
-  { key: 'en-m2', id: 'en_US-arctic-medium', speakerId: 1,    label: 'English – Male 2',    lang: 'en' },
-  { key: 'en-gb', id: 'en_GB-alan-medium',   speakerId: null, label: 'English GB – Male',   lang: 'en' },
-  // Swedish
-  { key: 'sv',    id: 'sv_SE-nst-medium',    speakerId: null, label: 'Swedish',             lang: 'sv' },
-  // German
-  { key: 'de-m',  id: 'de_DE-thorsten-medium', speakerId: null, label: 'German – Male',     lang: 'de' },
-  { key: 'de-f',  id: 'de_DE-kerstin-low',     speakerId: null, label: 'German – Female',   lang: 'de' },
-  // French
-  { key: 'fr-f',  id: 'fr_FR-siwis-medium',  speakerId: null, label: 'French – Female',    lang: 'fr' },
-  { key: 'fr-m',  id: 'fr_FR-gilles-low',    speakerId: null, label: 'French – Male',      lang: 'fr' },
-  // Spanish
-  { key: 'es',    id: 'es_ES-carlfm-x_low',  speakerId: null, label: 'Spanish',            lang: 'es' },
-  // Italian
-  { key: 'it-m',  id: 'it_IT-riccardo-x_low', speakerId: null, label: 'Italian – Male',    lang: 'it' },
-  { key: 'it-f',  id: 'it_IT-paola-medium',   speakerId: null, label: 'Italian – Female',  lang: 'it' },
-  // Norwegian (lang: 'nb' matches app's nb-NO; voice model is no_NO)
-  { key: 'nb',    id: 'no_NO-talesyntese-medium', speakerId: null, label: 'Norwegian',      lang: 'nb' },
-  // Danish
-  { key: 'da',    id: 'da_DK-talesyntese-medium', speakerId: null, label: 'Danish',         lang: 'da' },
-  // Finnish
-  { key: 'fi',    id: 'fi_FI-harri-low',          speakerId: null, label: 'Finnish',        lang: 'fi' },
+  { key: 'en-f1', id: 'en_US-hfc_female-medium', label: 'English – Female',  lang: 'en' },
+  { key: 'en-m1', id: 'en_US-arctic-medium',     label: 'English – Male',    lang: 'en' },
+  { key: 'en-gb', id: 'en_GB-alan-medium',        label: 'English GB – Male', lang: 'en' },
+  { key: 'sv',    id: 'sv_SE-nst-medium',          label: 'Swedish',          lang: 'sv' },
+  { key: 'de-m',  id: 'de_DE-thorsten-medium',     label: 'German – Male',    lang: 'de' },
+  { key: 'de-f',  id: 'de_DE-kerstin-low',         label: 'German – Female',  lang: 'de' },
+  { key: 'fr-f',  id: 'fr_FR-siwis-medium',        label: 'French – Female',  lang: 'fr' },
+  { key: 'fr-m',  id: 'fr_FR-gilles-low',          label: 'French – Male',    lang: 'fr' },
+  { key: 'es',    id: 'es_ES-carlfm-x_low',        label: 'Spanish',          lang: 'es' },
+  { key: 'it-m',  id: 'it_IT-riccardo-x_low',      label: 'Italian – Male',   lang: 'it' },
+  { key: 'it-f',  id: 'it_IT-paola-medium',        label: 'Italian – Female', lang: 'it' },
+  { key: 'nb',    id: 'no_NO-talesyntese-medium',   label: 'Norwegian',        lang: 'nb' },
+  { key: 'da',    id: 'da_DK-talesyntese-medium',   label: 'Danish',           lang: 'da' },
+  { key: 'fi',    id: 'fi_FI-harri-low',            label: 'Finnish',          lang: 'fi' },
 ];
 
 let piperReady = false;
@@ -1171,9 +1162,10 @@ function getDefaultPiperKey(langPrefix) {
 
 async function downloadPiperVoice(modelId, onProgress) {
   if (piperDownloaded.has(modelId)) return;
-  const stored = await tts.stored();
-  if (!stored.includes(modelId)) {
-    await tts.download(modelId, onProgress);
+  const lib = await getPiperLib();
+  const storedList = await lib.stored();
+  if (!storedList.includes(modelId)) {
+    await lib.download(modelId, onProgress);
   }
   piperDownloaded.add(modelId);
 }
@@ -1490,9 +1482,13 @@ function speakLine(text, character, onDone) {
       : getDefaultPiperKey();
     const voiceDef = getPiperVoiceByKey(voiceKey);
     document.getElementById('listening-status').textContent = character ? `🔊 ${character} is speaking...` : '🔊';
-    const predictOpts = { text, voiceId: voiceDef.id };
-    if (voiceDef.speakerId != null) predictOpts.speakerId = voiceDef.speakerId;
-    tts.predict(predictOpts).then(wavBlob => {
+    getPiperLib().then(lib => {
+      // The library is a singleton — reset it when the model changes so it re-initialises from cache
+      if (lib.TtsSession._instance && lib.TtsSession._instance.voiceId !== voiceDef.id) {
+        lib.TtsSession._instance = null;
+      }
+      return lib.predict({ voiceId: voiceDef.id, text });
+    }).then(wavBlob => {
       const audio = new Audio(URL.createObjectURL(wavBlob));
       audio.onended = () => {
         document.getElementById('listening-status').textContent = '';

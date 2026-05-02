@@ -506,7 +506,8 @@
 
 <!-- STEP 3: Pick character -->
 <div class="step hidden" id="step-character">
-  <h2>3. Which character are you?</h2>
+  <h2>3. Which character(s) do you play?</h2>
+  <p style="color:var(--text-2);font-size:0.9em;margin:0 0 12px;">Tap to select. Pick 0 to just listen.</p>
   <div class="character-list" id="character-list"></div>
 
   <div id="voice-assignments" style="margin-top:20px;display:none;">
@@ -523,7 +524,7 @@
     </div>
     <div id="piper-status" style="font-size:0.85em;color:var(--text-2);"></div>
   </div>
-  <button id="start-rehearsal" disabled>Start rehearsing →</button>
+  <button id="start-rehearsal">Start rehearsing →</button>
   <button id="back-to-edit" class="secondary">← Back</button>
 </div>
 
@@ -558,7 +559,7 @@
 let capturedImages = [];  // data URLs
 let parsedScript = [];    // [{character, text, isDirection}]
 let characters = [];
-let myCharacter = null;
+let myCharacters = new Set(); // characters the user will speak
 let currentLineIdx = 0;
 let vadStream = null;
 let vad = null;
@@ -608,7 +609,7 @@ function savePlay(name, scriptText) {
     scriptText,
     voiceAssignments: characterVoiceAssignments,
     piperVoiceAssignments,
-    myCharacter,
+    myCharacters: [...myCharacters],
     date: new Date().toISOString()
   };
   if (existing >= 0) {
@@ -637,7 +638,8 @@ function loadPlay(name) {
   document.getElementById('play-name').value = name;
   if (play.voiceAssignments) characterVoiceAssignments = play.voiceAssignments;
   if (play.piperVoiceAssignments) piperVoiceAssignments = play.piperVoiceAssignments;
-  if (play.myCharacter) myCharacter = play.myCharacter;
+  if (play.myCharacters) myCharacters = new Set(play.myCharacters);
+  else if (play.myCharacter) myCharacters = new Set([play.myCharacter]); // backwards compat
   showStep('step-edit');
 }
 
@@ -649,7 +651,8 @@ function quickStartPlay(name) {
   document.getElementById('play-name').value = name;
   if (play.voiceAssignments) characterVoiceAssignments = play.voiceAssignments;
   if (play.piperVoiceAssignments) piperVoiceAssignments = play.piperVoiceAssignments;
-  if (play.myCharacter) myCharacter = play.myCharacter;
+  if (play.myCharacters) myCharacters = new Set(play.myCharacters);
+  else if (play.myCharacter) myCharacters = new Set([play.myCharacter]); // backwards compat
   parsedScript = parseScript(play.scriptText);
   characters = [...new Set(parsedScript.filter(l => !l.isDirection).map(l => l.character))];
   renderCharacterList();
@@ -897,6 +900,7 @@ document.getElementById('parse-script').addEventListener('click', () => {
   characters = [...new Set(parsedScript.filter(l => !l.isDirection).map(l => l.character))];
   characterVoiceAssignments = {};
   piperVoiceAssignments = {};
+  myCharacters = new Set();
   renderCharacterList();
   populateVoices();
   showStep('step-character');
@@ -979,25 +983,31 @@ function renderCharacterList() {
   container.innerHTML = '';
   characters.forEach(c => {
     const chip = document.createElement('div');
-    chip.className = 'character-chip';
+    chip.className = 'character-chip' + (myCharacters.has(c) ? ' selected' : '');
     chip.textContent = c;
     chip.addEventListener('click', () => {
-      document.querySelectorAll('.character-chip').forEach(el => el.classList.remove('selected'));
-      chip.classList.add('selected');
-      myCharacter = c;
-      document.getElementById('start-rehearsal').disabled = false;
+      if (myCharacters.has(c)) {
+        myCharacters.delete(c);
+        chip.classList.remove('selected');
+      } else {
+        myCharacters.add(c);
+        chip.classList.add('selected');
+      }
       renderCharacterVoiceAssignments();
+      initPiper();
     });
     container.appendChild(chip);
   });
+  renderCharacterVoiceAssignments();
+  initPiper();
 }
 
 function renderCharacterVoiceAssignments() {
   const container = document.getElementById('character-voices');
   const parentDiv = document.getElementById('voice-assignments');
-  if (!myCharacter || !container || !parentDiv) return;
+  if (!container || !parentDiv) return;
 
-  const others = characters.filter(c => c !== myCharacter);
+  const others = characters.filter(c => !myCharacters.has(c));
   if (others.length === 0) {
     parentDiv.style.display = 'none';
     return;
@@ -1260,13 +1270,16 @@ async function downloadPiperVoice(modelId, onProgress) {
 
 async function initPiper() {
   const startBtn = document.getElementById('start-rehearsal');
-  const others = characters.filter(c => c !== myCharacter);
-  const assignedKeys = others.length > 0
-    ? others.map(c => piperVoiceAssignments[c] || getDefaultPiperKey())
-    : [getDefaultPiperKey()];
+  const others = characters.filter(c => !myCharacters.has(c));
+
+  if (others.length === 0) {
+    piperReady = true; // user plays every role — no TTS needed
+    return;
+  }
+
+  const assignedKeys = others.map(c => piperVoiceAssignments[c] || getDefaultPiperKey());
   const neededModelIds = new Set(assignedKeys.map(k => getPiperVoiceByKey(k).id));
 
-  // Characters that use a given model ID
   const charsFor = (modelId) => others.filter(c =>
     getPiperVoiceByKey(piperVoiceAssignments[c] || getDefaultPiperKey()).id === modelId
   );
@@ -1276,7 +1289,6 @@ async function initPiper() {
       if (el) el.textContent = text;
     });
 
-  // Mark already-downloaded models immediately
   for (const modelId of neededModelIds) {
     if (piperDownloaded.has(modelId)) setDlStatus(modelId, '✓');
   }
@@ -1288,7 +1300,7 @@ async function initPiper() {
     return;
   }
 
-  if (startBtn && myCharacter) startBtn.disabled = true;
+  if (startBtn) startBtn.disabled = true;
 
   for (const modelId of toDownload) {
     try {
@@ -1300,13 +1312,13 @@ async function initPiper() {
     } catch (e) {
       console.error('Piper download failed:', modelId, e);
       setDlStatus(modelId, '⚠️');
-      if (startBtn && myCharacter) startBtn.disabled = false;
+      if (startBtn) startBtn.disabled = false;
       return;
     }
   }
 
   piperReady = true;
-  if (startBtn && myCharacter) startBtn.disabled = false;
+  if (startBtn) startBtn.disabled = false;
 }
 
 // Re-render voice dropdowns when script language changes
@@ -1332,7 +1344,7 @@ function getVoiceForCharacter(char) {
   const speechLang = langSel ? langSel.value.split('|')[1] : 'en-US';
   const langPrefix = speechLang.split('-')[0];
   const sameLang = voices.filter(v => v.lang.startsWith(langPrefix));
-  const others = characters.filter(c => c !== myCharacter);
+  const others = characters.filter(c => !myCharacters.has(c));
   const idx = others.indexOf(char);
   const voice = sameLang[idx % sameLang.length] || voices[0];
   characterVoiceMap[char] = voice;
@@ -1436,7 +1448,7 @@ function submitTextLine() {
   const text = input.value.trim();
   if (!text) return;
   const line = parsedScript[currentLineIdx];
-  if (line && line.character === myCharacter) {
+  if (line && myCharacters.has(line.character)) {
     input.value = '';
     currentLineIdx++;
     advanceLine();
@@ -1454,8 +1466,8 @@ function renderScriptDisplay() {
       div.textContent = '— ' + line.text + ' —';
     } else {
       div.className = 'rehearsal-line';
-      if (line.character === myCharacter) div.classList.add('mine');
-      div.innerHTML = `<div class="character-name">${escapeHtml(line.character)}${line.character === myCharacter ? ' (you)' : ''}</div><div class="line-text">${escapeHtml(line.text)}</div>`;
+      if (myCharacters.has(line.character)) div.classList.add('mine');
+      div.innerHTML = `<div class="character-name">${escapeHtml(line.character)}${myCharacters.has(line.character) ? ' (you)' : ''}</div><div class="line-text">${escapeHtml(line.text)}</div>`;
     }
     container.appendChild(div);
   });
@@ -1497,7 +1509,7 @@ function advanceLine() {
       currentLineIdx++;
       advanceLine();
     });
-  } else if (line.character === myCharacter) {
+  } else if (myCharacters.has(line.character)) {
     listenForLine();
   } else {
     speakLine(line.text, line.character, () => {
@@ -1533,7 +1545,7 @@ function prefetchUpcomingLines(fromIdx) {
   let count = 0;
   for (let i = fromIdx + 1; i < parsedScript.length && count < 3; i++) {
     const line = parsedScript[i];
-    if (!line.isDirection && line.character !== myCharacter && !piperCache.has(i)) {
+    if (!line.isDirection && !myCharacters.has(line.character) && !piperCache.has(i)) {
       piperPredict(i);
       count++;
     }
@@ -1640,7 +1652,7 @@ document.getElementById('repeat-line').addEventListener('click', () => {
   vad?.pause();
   // Find previous spoken (non-mine) line
   let i = currentLineIdx - 1;
-  while (i >= 0 && (parsedScript[i].isDirection || parsedScript[i].character === myCharacter)) i--;
+  while (i >= 0 && (parsedScript[i].isDirection || myCharacters.has(parsedScript[i].character))) i--;
   if (i >= 0) {
     currentLineIdx = i;
     advanceLine();

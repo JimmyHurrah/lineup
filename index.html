@@ -340,6 +340,16 @@
   }
   .voice-row label { min-width: 110px; flex-shrink: 0; font-size: 0.9em; cursor: default; }
   .voice-row select { flex: 1; font-size: 0.88em; }
+  .voice-props { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: 1; }
+  .prop-pill {
+    padding: 4px 10px; border-radius: 14px; font-size: 0.8em; cursor: pointer;
+    border: 1.5px solid var(--border); background: var(--surface-2); color: var(--text-2);
+    min-height: 32px; display: inline-flex; align-items: center;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+    -webkit-tap-highlight-color: transparent; user-select: none;
+  }
+  .prop-pill.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+  .prop-pill-sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; flex-shrink: 0; }
 
   /* ── Captured image thumbnails ── */
   .thumb-wrap { display: inline-block; margin: 4px; position: relative; vertical-align: top; }
@@ -1012,85 +1022,80 @@ function renderCharacterVoiceAssignments() {
     parentDiv.style.display = 'none';
     return;
   }
-
-  const usePiper = true;
   parentDiv.style.display = 'block';
   container.innerHTML = '';
 
-  if (usePiper) {
-    // Piper mode: show Piper voice dropdowns filtered by script language
-    const langPrefix = getScriptLangPrefix();
-    const availableVoices = getPiperVoicesForLang(langPrefix);
+  others.forEach(c => {
+    // Ensure prefs object exists with adult default
+    if (!piperVoiceAssignments[c] || typeof piperVoiceAssignments[c] === 'string') {
+      const legacy = typeof piperVoiceAssignments[c] === 'string' ? piperVoiceAssignments[c] : null;
+      piperVoiceAssignments[c] = legacy ? legacy : { gender: null, age: 'adult' };
+    }
+    const prefs = piperVoiceAssignments[c];
+    const isLegacy = typeof prefs === 'string';
+    const gender = isLegacy ? null : (prefs.gender ?? null);
+    const age    = isLegacy ? 'adult' : (prefs.age ?? 'adult');
 
-    others.forEach((c, idx) => {
-      // Auto-cycle through available voices as defaults so characters sound different
-      if (!piperVoiceAssignments[c]) {
-        piperVoiceAssignments[c] = availableVoices[idx % availableVoices.length]?.key || availableVoices[0]?.key;
-      }
+    const row = document.createElement('div');
+    row.className = 'voice-row';
+    row.innerHTML = `<label>${escapeHtml(c)}</label>`;
 
-      const row = document.createElement('div');
-      row.className = 'voice-row';
-      row.innerHTML = `<label>${c}</label>`;
-      const sel = document.createElement('select');
-      sel.id = `voice-for-${c}`;
-      availableVoices.forEach(v => {
-        const opt = document.createElement('option');
-        opt.value = v.key;
-        opt.textContent = v.label;
-        if (piperVoiceAssignments[c] === v.key) opt.selected = true;
-        sel.appendChild(opt);
-      });
-      sel.onchange = () => {
-        piperVoiceAssignments[c] = sel.value;
+    const props = document.createElement('div');
+    props.className = 'voice-props';
+
+    // Gender pills
+    const genderPills = document.createElement('div');
+    genderPills.style.cssText = 'display:flex;gap:4px;flex-shrink:0;';
+    [['♀', 'female'], ['♂', 'male']].forEach(([icon, g]) => {
+      const pill = document.createElement('span');
+      pill.className = 'prop-pill' + (gender === g ? ' active' : '');
+      pill.textContent = icon + ' ' + (g === 'female' ? 'Female' : 'Male');
+      pill.addEventListener('click', () => {
+        const p = typeof piperVoiceAssignments[c] === 'string' ? { gender: null, age: 'adult' } : { ...piperVoiceAssignments[c] };
+        p.gender = p.gender === g ? null : g;
+        piperVoiceAssignments[c] = p;
         piperReady = false;
+        renderCharacterVoiceAssignments();
         initPiper();
-      };
-      row.appendChild(sel);
-      const dlSpan = document.createElement('span');
-      dlSpan.className = 'dl-status';
-      dlSpan.id = `dl-${c}`;
-      const currentVoiceDef = getPiperVoiceByKey(piperVoiceAssignments[c]);
-      dlSpan.textContent = piperDownloaded.has(currentVoiceDef.id) ? '✓' : '';
-      row.appendChild(dlSpan);
-      container.appendChild(row);
-    });
-  } else {
-    // System TTS mode: show browser voices filtered by script language
-    const seen = new Set();
-    const uniqueVoices = voices.filter(v => {
-      const baseName = v.name.replace(/\s*\(.*?\)\s*/g, '').trim();
-      if (seen.has(baseName)) return false;
-      seen.add(baseName);
-      return true;
-    });
-
-    const langSelect = document.getElementById('lang-select');
-    const [ocrLang, speechLang] = langSelect ? langSelect.value.split('|') : ['eng', 'en-US'];
-    const langPrefix = speechLang.split('-')[0];
-    const isMixed = ocrLang.includes('+');
-    const langFiltered = isMixed ? uniqueVoices : uniqueVoices.filter(v => v.lang.startsWith(langPrefix));
-    const displayVoices = langFiltered.length > 0 ? langFiltered : uniqueVoices;
-
-    others.forEach(c => {
-      const row = document.createElement('div');
-      row.className = 'voice-row';
-      row.innerHTML = `<label>${c}</label>`;
-      const sel = document.createElement('select');
-      sel.id = `voice-for-${c}`;
-      displayVoices.forEach(v => {
-        const opt = document.createElement('option');
-        opt.value = voices.indexOf(v);
-        opt.textContent = `${v.name} (${v.lang})`;
-        if (characterVoiceAssignments[c] === voices.indexOf(v)) opt.selected = true;
-        sel.appendChild(opt);
       });
-      sel.onchange = () => {
-        characterVoiceAssignments[c] = parseInt(sel.value);
-      };
-      row.appendChild(sel);
-      container.appendChild(row);
+      genderPills.appendChild(pill);
     });
-  }
+    props.appendChild(genderPills);
+
+    const sep = document.createElement('span');
+    sep.className = 'prop-pill-sep';
+    props.appendChild(sep);
+
+    // Age pills
+    const agePills = document.createElement('div');
+    agePills.style.cssText = 'display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap;';
+    [['child', 'Child'], ['teen', 'Teen'], ['adult', 'Adult'], ['senior', 'Elder']].forEach(([a, label]) => {
+      const pill = document.createElement('span');
+      pill.className = 'prop-pill' + (age === a ? ' active' : '');
+      pill.textContent = label;
+      pill.addEventListener('click', () => {
+        const p = typeof piperVoiceAssignments[c] === 'string' ? { gender: null, age: 'adult' } : { ...piperVoiceAssignments[c] };
+        p.age = p.age === a ? null : a;
+        piperVoiceAssignments[c] = p;
+        piperReady = false;
+        renderCharacterVoiceAssignments();
+        initPiper();
+      });
+      agePills.appendChild(pill);
+    });
+    props.appendChild(agePills);
+
+    row.appendChild(props);
+
+    const dlSpan = document.createElement('span');
+    dlSpan.className = 'dl-status';
+    dlSpan.id = `dl-${c}`;
+    const resolvedKey = resolveVoiceKey(c);
+    dlSpan.textContent = piperDownloaded.has(getPiperVoiceByKey(resolvedKey).id) ? '✓' : '';
+    row.appendChild(dlSpan);
+
+    container.appendChild(row);
+  });
 }
 
 // ============ Voices ============
@@ -1177,63 +1182,64 @@ if (document.readyState === 'loading') {
 // ============ Piper TTS Engine ============
 const PIPER_VOICES = [
   // English US – Female
-  { key: 'en-us-f1', id: 'en_US-hfc_female-medium',  label: 'US Female 1',      lang: 'en' },
-  { key: 'en-us-f2', id: 'en_US-amy-medium',          label: 'US Female 2',      lang: 'en' },
-  { key: 'en-us-f3', id: 'en_US-kristin-medium',      label: 'US Female 3',      lang: 'en' },
-  { key: 'en-us-f4', id: 'en_US-ljspeech-medium',     label: 'US Female 4',      lang: 'en' },
-  { key: 'en-us-f5', id: 'en_US-kathleen-low',        label: 'US Female 5',      lang: 'en' },
+  { key: 'en-us-f1', id: 'en_US-hfc_female-medium',  label: 'US Female 1', lang: 'en', gender: 'female' },
+  { key: 'en-us-f2', id: 'en_US-amy-medium',          label: 'US Female 2', lang: 'en', gender: 'female' },
+  { key: 'en-us-f3', id: 'en_US-kristin-medium',      label: 'US Female 3', lang: 'en', gender: 'female' },
+  { key: 'en-us-f4', id: 'en_US-ljspeech-medium',     label: 'US Female 4', lang: 'en', gender: 'female' },
+  { key: 'en-us-f5', id: 'en_US-kathleen-low',        label: 'US Female 5', lang: 'en', gender: 'female' },
   // English US – Male
-  { key: 'en-us-m1', id: 'en_US-hfc_male-medium',    label: 'US Male 1',        lang: 'en' },
-  { key: 'en-us-m2', id: 'en_US-ryan-medium',         label: 'US Male 2',        lang: 'en' },
-  { key: 'en-us-m3', id: 'en_US-joe-medium',          label: 'US Male 3',        lang: 'en' },
-  { key: 'en-us-m4', id: 'en_US-john-medium',         label: 'US Male 4',        lang: 'en' },
-  { key: 'en-us-m5', id: 'en_US-norman-medium',       label: 'US Male 5',        lang: 'en' },
-  { key: 'en-us-m6', id: 'en_US-arctic-medium',       label: 'US Male 6',        lang: 'en' },
+  { key: 'en-us-m1', id: 'en_US-hfc_male-medium',     label: 'US Male 1',   lang: 'en', gender: 'male' },
+  { key: 'en-us-m2', id: 'en_US-ryan-medium',          label: 'US Male 2',   lang: 'en', gender: 'male' },
+  { key: 'en-us-m3', id: 'en_US-joe-medium',           label: 'US Male 3',   lang: 'en', gender: 'male' },
+  { key: 'en-us-m4', id: 'en_US-john-medium',          label: 'US Male 4',   lang: 'en', gender: 'male' },
+  { key: 'en-us-m5', id: 'en_US-norman-medium',        label: 'US Male 5',   lang: 'en', gender: 'male' },
+  { key: 'en-us-m6', id: 'en_US-arctic-medium',        label: 'US Male 6',   lang: 'en', gender: 'male' },
   // English GB – Female
-  { key: 'en-gb-f1', id: 'en_GB-cori-medium',         label: 'GB Female 1',      lang: 'en' },
-  { key: 'en-gb-f2', id: 'en_GB-alba-medium',         label: 'GB Female 2',      lang: 'en' },
-  { key: 'en-gb-f3', id: 'en_GB-jenny_dioco-medium',  label: 'GB Female 3',      lang: 'en' },
-  { key: 'en-gb-f4', id: 'en_GB-southern_english_female-low', label: 'GB Female 4', lang: 'en' },
+  { key: 'en-gb-f1', id: 'en_GB-cori-medium',          label: 'GB Female 1', lang: 'en', gender: 'female' },
+  { key: 'en-gb-f2', id: 'en_GB-alba-medium',          label: 'GB Female 2', lang: 'en', gender: 'female' },
+  { key: 'en-gb-f3', id: 'en_GB-jenny_dioco-medium',   label: 'GB Female 3', lang: 'en', gender: 'female' },
+  { key: 'en-gb-f4', id: 'en_GB-southern_english_female-low', label: 'GB Female 4', lang: 'en', gender: 'female' },
   // English GB – Male
-  { key: 'en-gb-m1', id: 'en_GB-alan-medium',               label: 'GB Male 1',  lang: 'en' },
-  { key: 'en-gb-m2', id: 'en_GB-northern_english_male-medium', label: 'GB Male 2', lang: 'en' },
-  { key: 'en-gb-m3', id: 'en_GB-aru-medium',               label: 'GB Male 3',   lang: 'en' },
-  // English – Fast (low quality, smaller download)
-  { key: 'en-us-fast-f1', id: 'en_US-lessac-low',           label: 'US Female (fast)', lang: 'en' },
-  { key: 'en-us-fast-m1', id: 'en_US-ryan-low',             label: 'US Male (fast)',   lang: 'en' },
-  { key: 'en-us-fast-m2', id: 'en_US-danny-low',            label: 'US Male 2 (fast)', lang: 'en' },
-  { key: 'en-gb-fast-m1', id: 'en_GB-alan-low',             label: 'GB Male (fast)',   lang: 'en' },
+  { key: 'en-gb-m1', id: 'en_GB-alan-medium',                  label: 'GB Male 1', lang: 'en', gender: 'male' },
+  { key: 'en-gb-m2', id: 'en_GB-northern_english_male-medium', label: 'GB Male 2', lang: 'en', gender: 'male' },
+  { key: 'en-gb-m3', id: 'en_GB-aru-medium',                   label: 'GB Male 3', lang: 'en', gender: 'male' },
+  // English – Fast (lower quality, smaller download — excluded from auto-assignment)
+  { key: 'en-us-fast-f1', id: 'en_US-lessac-low', label: 'US Female (fast)', lang: 'en', gender: 'female', fast: true },
+  { key: 'en-us-fast-m1', id: 'en_US-ryan-low',   label: 'US Male (fast)',   lang: 'en', gender: 'male',   fast: true },
+  { key: 'en-us-fast-m2', id: 'en_US-danny-low',  label: 'US Male 2 (fast)', lang: 'en', gender: 'male',   fast: true },
+  { key: 'en-gb-fast-m1', id: 'en_GB-alan-low',   label: 'GB Male (fast)',   lang: 'en', gender: 'male',   fast: true },
   // Swedish
-  { key: 'sv-1',   id: 'sv_SE-nst-medium',              label: 'Swedish',         lang: 'sv' },
+  { key: 'sv-1',  id: 'sv_SE-nst-medium',       label: 'Swedish',         lang: 'sv', gender: 'male' },
   // German – Female
-  { key: 'de-f1',  id: 'de_DE-kerstin-low',             label: 'German Female 1', lang: 'de' },
-  { key: 'de-f2',  id: 'de_DE-eva_k-x_low',             label: 'German Female 2', lang: 'de' },
-  { key: 'de-f3',  id: 'de_DE-ramona-low',              label: 'German Female 3', lang: 'de' },
+  { key: 'de-f1', id: 'de_DE-kerstin-low',       label: 'German Female 1', lang: 'de', gender: 'female' },
+  { key: 'de-f2', id: 'de_DE-eva_k-x_low',       label: 'German Female 2', lang: 'de', gender: 'female' },
+  { key: 'de-f3', id: 'de_DE-ramona-low',        label: 'German Female 3', lang: 'de', gender: 'female' },
   // German – Male
-  { key: 'de-m1',  id: 'de_DE-thorsten-high',           label: 'German Male 1',   lang: 'de' },
-  { key: 'de-m2',  id: 'de_DE-karlsson-low',            label: 'German Male 2',   lang: 'de' },
-  { key: 'de-m3',  id: 'de_DE-pavoque-low',             label: 'German Male 3',   lang: 'de' },
+  { key: 'de-m1', id: 'de_DE-thorsten-high',     label: 'German Male 1',   lang: 'de', gender: 'male' },
+  { key: 'de-m2', id: 'de_DE-karlsson-low',      label: 'German Male 2',   lang: 'de', gender: 'male' },
+  { key: 'de-m3', id: 'de_DE-pavoque-low',       label: 'German Male 3',   lang: 'de', gender: 'male' },
   // French – Female
-  { key: 'fr-f1',  id: 'fr_FR-siwis-medium',            label: 'French Female 1', lang: 'fr' },
-  { key: 'fr-f2',  id: 'fr_FR-upmc-medium',             label: 'French Female 2', lang: 'fr' },
-  { key: 'fr-f3',  id: 'fr_FR-mls-medium',              label: 'French Female 3', lang: 'fr' },
+  { key: 'fr-f1', id: 'fr_FR-siwis-medium',      label: 'French Female 1', lang: 'fr', gender: 'female' },
+  { key: 'fr-f2', id: 'fr_FR-upmc-medium',       label: 'French Female 2', lang: 'fr', gender: 'female' },
+  { key: 'fr-f3', id: 'fr_FR-mls-medium',        label: 'French Female 3', lang: 'fr', gender: 'female' },
   // French – Male
-  { key: 'fr-m1',  id: 'fr_FR-gilles-low',              label: 'French Male 1',   lang: 'fr' },
-  { key: 'fr-m2',  id: 'fr_FR-tom-medium',              label: 'French Male 2',   lang: 'fr' },
-  // Spanish
-  { key: 'es-f1',  id: 'es_ES-sharvard-medium',         label: 'Spanish Female',  lang: 'es' },
-  { key: 'es-m1',  id: 'es_ES-davefx-medium',           label: 'Spanish Male 1',  lang: 'es' },
-  { key: 'es-m2',  id: 'es_MX-ald-medium',              label: 'Spanish Male 2',  lang: 'es' },
-  { key: 'es-m3',  id: 'es_ES-carlfm-x_low',            label: 'Spanish Male 3',  lang: 'es' },
+  { key: 'fr-m1', id: 'fr_FR-gilles-low',        label: 'French Male 1',   lang: 'fr', gender: 'male' },
+  { key: 'fr-m2', id: 'fr_FR-tom-medium',        label: 'French Male 2',   lang: 'fr', gender: 'male' },
+  // Spanish – Female
+  { key: 'es-f1', id: 'es_ES-sharvard-medium',   label: 'Spanish Female',  lang: 'es', gender: 'female' },
+  // Spanish – Male
+  { key: 'es-m1', id: 'es_ES-davefx-medium',     label: 'Spanish Male 1',  lang: 'es', gender: 'male' },
+  { key: 'es-m2', id: 'es_MX-ald-medium',        label: 'Spanish Male 2',  lang: 'es', gender: 'male' },
+  { key: 'es-m3', id: 'es_ES-carlfm-x_low',      label: 'Spanish Male 3',  lang: 'es', gender: 'male' },
   // Italian
-  { key: 'it-f1',  id: 'it_IT-paola-medium',            label: 'Italian Female',  lang: 'it' },
-  { key: 'it-m1',  id: 'it_IT-riccardo-x_low',          label: 'Italian Male',    lang: 'it' },
+  { key: 'it-f1', id: 'it_IT-paola-medium',      label: 'Italian Female',  lang: 'it', gender: 'female' },
+  { key: 'it-m1', id: 'it_IT-riccardo-x_low',    label: 'Italian Male',    lang: 'it', gender: 'male' },
   // Norwegian
-  { key: 'nb-1',   id: 'no_NO-talesyntese-medium',      label: 'Norwegian',       lang: 'nb' },
+  { key: 'nb-1',  id: 'no_NO-talesyntese-medium', label: 'Norwegian',      lang: 'nb', gender: 'male' },
   // Danish
-  { key: 'da-1',   id: 'da_DK-talesyntese-medium',      label: 'Danish',          lang: 'da' },
+  { key: 'da-1',  id: 'da_DK-talesyntese-medium', label: 'Danish',         lang: 'da', gender: 'male' },
   // Finnish
-  { key: 'fi-1',   id: 'fi_FI-harri-medium',            label: 'Finnish',         lang: 'fi' },
+  { key: 'fi-1',  id: 'fi_FI-harri-medium',       label: 'Finnish',        lang: 'fi', gender: 'male' },
 ];
 
 let piperReady = false;
@@ -1258,6 +1264,28 @@ function getDefaultPiperKey(langPrefix) {
   return getPiperVoicesForLang(langPrefix || getScriptLangPrefix())[0]?.key || 'en-f1';
 }
 
+function resolveVoiceKey(char, langPrefix) {
+  const prefs = piperVoiceAssignments[char];
+  if (typeof prefs === 'string') return prefs; // legacy format
+  const gender = prefs?.gender ?? null;
+  const lang = langPrefix || getScriptLangPrefix();
+  const all = getPiperVoicesForLang(lang);
+  const pool = all.filter(v => !v.fast).filter(v => !gender || v.gender === gender);
+  const voices = pool.length > 0 ? pool : all.filter(v => !v.fast).length > 0 ? all.filter(v => !v.fast) : all;
+  const seed = [...char].reduce((a, c) => a + c.charCodeAt(0), 0);
+  return voices[seed % voices.length].key;
+}
+
+function getCharacterPlaybackRate(char) {
+  const prefs = piperVoiceAssignments[char];
+  if (typeof prefs === 'string') return 1.0; // legacy key, no pitch tweak
+  const age = prefs?.age ?? 'adult';
+  const base = { child: 1.35, teen: 1.12, adult: 1.0, senior: 0.88 }[age] ?? 1.0;
+  const seed = [...char].reduce((a, c) => a + c.charCodeAt(0), 0);
+  const nudge = ((seed * 13 + 7) % 9 - 4) / 100; // ±4% variance per character
+  return base * (1 + nudge);
+}
+
 async function downloadPiperVoice(modelId, onProgress) {
   if (piperDownloaded.has(modelId)) return;
   const lib = await getPiperLib();
@@ -1277,11 +1305,11 @@ async function initPiper() {
     return;
   }
 
-  const assignedKeys = others.map(c => piperVoiceAssignments[c] || getDefaultPiperKey());
+  const assignedKeys = others.map(c => resolveVoiceKey(c));
   const neededModelIds = new Set(assignedKeys.map(k => getPiperVoiceByKey(k).id));
 
   const charsFor = (modelId) => others.filter(c =>
-    getPiperVoiceByKey(piperVoiceAssignments[c] || getDefaultPiperKey()).id === modelId
+    getPiperVoiceByKey(resolveVoiceKey(c)).id === modelId
   );
   const setDlStatus = (modelId, text) =>
     charsFor(modelId).forEach(c => {
@@ -1525,9 +1553,9 @@ function piperPredict(lineIdx) {
   if (piperCache.has(lineIdx)) return piperCache.get(lineIdx);
   const line = parsedScript[lineIdx];
   if (!line) return Promise.resolve(null);
-  const voiceKey = line.character
-    ? (piperVoiceAssignments[line.character] || getDefaultPiperKey())
-    : getDefaultPiperKey();
+  const langPool = getPiperVoicesForLang(getScriptLangPrefix());
+  const fallbackKey = langPool.find(v => !v.fast)?.key || langPool[0]?.key;
+  const voiceKey = line.character ? resolveVoiceKey(line.character) : fallbackKey;
   const voiceDef = getPiperVoiceByKey(voiceKey);
   const p = piperQueue = piperQueue.then(() => getPiperLib()).then(lib => {
     if (lib.TtsSession._instance && lib.TtsSession._instance.voiceId !== voiceDef.id) {
@@ -1566,6 +1594,7 @@ function speakLine(text, character, onDone) {
       statusEl.textContent = character ? `🔊 ${character} is speaking...` : '🔊';
       const url = URL.createObjectURL(wavBlob);
       const audio = new Audio(url);
+      audio.playbackRate = character ? getCharacterPlaybackRate(character) : 1.0;
       currentAudio = audio;
       let done = false;
       const finish = (errMsg) => {

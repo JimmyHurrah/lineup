@@ -571,8 +571,9 @@ const ACTIVE_KEY = 'lineup_active';
 let characterVoiceAssignments = {}; // { 'CHAR_NAME': voiceIndex } — system TTS
 let piperVoiceAssignments = {};      // { 'CHAR_NAME': piperVoiceKey }
 let piperLib = null;
-const piperCache = new Map();        // lineIdx -> Promise<Blob> (prefetch cache)
-let piperPrepareDone = Promise.resolve(); // resolves when all lines are pre-generated
+const piperCache = new Map();   // lineIdx -> Promise<Blob>
+let piperQueue = Promise.resolve(); // serialises piperPredict calls (one WASM inference at a time)
+let currentAudio = null;        // currently playing Piper Audio element
 async function getPiperLib() {
   if (!piperLib) {
     piperLib = await import('https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1.0.4/dist/piper-tts-web.js');
@@ -1380,6 +1381,8 @@ class VoiceActivityDetector {
 
 async function requestMicPermission() {
   const micDiv = document.getElementById('mic-permission');
+  // Unlock HTMLAudioElement autoplay on iOS while still in synchronous user-gesture context
+  new Audio().play().catch(() => {});
   try {
     vadStream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true }
@@ -1390,7 +1393,7 @@ async function requestMicPermission() {
     if (noMicFallback) noMicFallback.classList.remove('hidden');
   }
   if (micDiv) micDiv.classList.add('hidden');
-  piperPrepareDone.then(() => advanceLine());
+  advanceLine();
 }
 
 // ============ Rehearsal flow ============
@@ -1398,11 +1401,13 @@ document.getElementById('start-rehearsal').addEventListener('click', () => {
   currentLineIdx = 0;
   characterVoiceMap = {};
   piperCache.clear();
+  piperQueue = Promise.resolve(); // discard any pending background generations
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   renderScriptDisplay();
   showStep('step-rehearse');
 
-  // Pre-generate all spoken lines; rehearsal starts only after this resolves
-  piperPrepareDone = prepareAllPiperAudio();
+  // Unlock HTMLAudioElement autoplay on iOS (must be synchronous in user gesture)
+  new Audio().play().catch(() => {});
 
   // Warm up speech synthesis so the first real line doesn't get swallowed
   try {
@@ -1414,14 +1419,14 @@ document.getElementById('start-rehearsal').addEventListener('click', () => {
   voices = speechSynthesis.getVoices();
 
   if (vad) {
-    piperPrepareDone.then(() => advanceLine());
+    advanceLine();
   } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     const micDiv = document.getElementById('mic-permission');
     if (micDiv) micDiv.classList.remove('hidden');
   } else {
     const noMicFallback = document.getElementById('no-mic-fallback');
     if (noMicFallback) noMicFallback.classList.remove('hidden');
-    piperPrepareDone.then(() => advanceLine());
+    advanceLine();
   }
 });
 
@@ -1479,6 +1484,7 @@ function highlightLine(idx) {
 function advanceLine() {
   if (currentLineIdx >= parsedScript.length) {
     speechSynthesis.cancel();
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
     vad?.pause();
     document.getElementById('listening-status').textContent = ' — Done! 🎉';
     return;
@@ -1501,62 +1507,8 @@ function advanceLine() {
   }
 }
 
-async function prepareAllPiperAudio() {
-  if (!piperReady) return;
-  const lines = parsedScript
-    .map((line, i) => ({ line, i }))
-    .filter(({ line }) => line.isDirection || line.character !== myCharacter);
-  if (lines.length === 0) return;
-
-  const statusEl = document.getElementById('listening-status');
-  let done = 0;
-  statusEl.textContent = `⏳ Preparing voices… 0 / ${lines.length}`;
-
-  const lib = await getPiperLib();
-
-  // Group lines by voice model so we can run each group sequentially
-  // but all groups in parallel (different models don't share ORT sessions)
-  const lineVoiceId = (line) => {
-    const key = line.character
-      ? (piperVoiceAssignments[line.character] || getDefaultPiperKey())
-      : getDefaultPiperKey();
-    return getPiperVoiceByKey(key).id;
-  };
-
-  const groups = new Map(); // voiceId -> [{line, i}]
-  for (const item of lines) {
-    const vid = lineVoiceId(item.line);
-    if (!groups.has(vid)) groups.set(vid, []);
-    groups.get(vid).push(item);
-  }
-
-  // Create one TtsSession per unique voiceId — reset the singleton between
-  // each so we get independent session objects with their own ORT sessions
-  const sessions = new Map();
-  for (const voiceId of groups.keys()) {
-    lib.TtsSession._instance = null;
-    sessions.set(voiceId, new lib.TtsSession({ voiceId }));
-  }
-  lib.TtsSession._instance = null;
-
-  // Run each group sequentially; all groups concurrently
-  await Promise.all([...groups.entries()].map(async ([voiceId, groupLines]) => {
-    const session = sessions.get(voiceId);
-    for (const { line, i } of groupLines) {
-      try {
-        const blob = await session.predict(line.text);
-        piperCache.set(i, Promise.resolve(blob));
-      } catch (e) {
-        console.error('Prefetch failed line', i, e);
-      }
-      statusEl.textContent = `⏳ Preparing voices… ${++done} / ${lines.length}`;
-    }
-  }));
-
-  statusEl.textContent = '';
-}
-
-// Generate (or return cached) audio blob for a given script line index.
+// Generate (or return cached) audio blob. All calls are serialised through
+// piperQueue so only one WASM inference runs at a time (avoids _instance races).
 function piperPredict(lineIdx) {
   if (piperCache.has(lineIdx)) return piperCache.get(lineIdx);
   const line = parsedScript[lineIdx];
@@ -1565,7 +1517,7 @@ function piperPredict(lineIdx) {
     ? (piperVoiceAssignments[line.character] || getDefaultPiperKey())
     : getDefaultPiperKey();
   const voiceDef = getPiperVoiceByKey(voiceKey);
-  const p = getPiperLib().then(lib => {
+  const p = piperQueue = piperQueue.then(() => getPiperLib()).then(lib => {
     if (lib.TtsSession._instance && lib.TtsSession._instance.voiceId !== voiceDef.id) {
       lib.TtsSession._instance = null;
     }
@@ -1575,14 +1527,15 @@ function piperPredict(lineIdx) {
   return p;
 }
 
-// Kick off generation for the next other-character line so it's ready when needed.
-function prefetchNextPiperLine(fromIdx) {
-  if (!true || !piperReady) return;
-  for (let i = fromIdx + 1; i < parsedScript.length; i++) {
+// While current line plays, pre-generate the next few non-user lines.
+function prefetchUpcomingLines(fromIdx) {
+  if (!piperReady) return;
+  let count = 0;
+  for (let i = fromIdx + 1; i < parsedScript.length && count < 3; i++) {
     const line = parsedScript[i];
-    if (!line.isDirection && line.character !== myCharacter) {
+    if (!line.isDirection && line.character !== myCharacter && !piperCache.has(i)) {
       piperPredict(i);
-      return;
+      count++;
     }
   }
 }
@@ -1593,28 +1546,33 @@ function speakLine(text, character, onDone) {
   if (usePiper && piperReady) {
     const lineIdx = currentLineIdx;
     const statusEl = document.getElementById('listening-status');
+    // Stop whatever was playing before (prevents overlap when Skip is pressed mid-line)
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
     statusEl.textContent = piperCache.has(lineIdx) ? (character ? `🔊 ${character} is speaking...` : '🔊') : '⏳ Generating...';
     piperPredict(lineIdx).then(wavBlob => {
+      if (!wavBlob) { if (onDone) onDone(); return; }
       statusEl.textContent = character ? `🔊 ${character} is speaking...` : '🔊';
       const url = URL.createObjectURL(wavBlob);
       const audio = new Audio(url);
-      audio.onended = () => {
-        statusEl.textContent = '';
+      currentAudio = audio;
+      let done = false;
+      const finish = (errMsg) => {
+        if (done) return;
+        done = true;
+        if (currentAudio === audio) currentAudio = null;
         URL.revokeObjectURL(url);
+        if (errMsg) statusEl.textContent = errMsg;
+        else statusEl.textContent = '';
         if (onDone) onDone();
       };
-      audio.onerror = () => {
-        statusEl.textContent = '⚠️ Audio error';
-        if (onDone) onDone();
-      };
+      audio.onended = () => finish(null);
+      audio.onerror = () => finish('⚠️ Audio error');
       const playPromise = audio.play();
       if (playPromise) playPromise.catch(err => {
         console.error('Audio play blocked:', err);
-        statusEl.textContent = '⚠️ Audio blocked — tap screen and retry';
-        if (onDone) onDone();
+        finish('⚠️ Tap screen to start audio');
       });
-      // Start generating the next other-character line while this one plays
-      prefetchNextPiperLine(lineIdx);
+      prefetchUpcomingLines(lineIdx);
     }).catch(e => {
       console.error('Piper error:', e);
       statusEl.textContent = '⚠️ Piper error: ' + (e.message || e);
@@ -1670,6 +1628,7 @@ function listenForLine() {
 // ============ Rehearsal controls ============
 document.getElementById('next-line').addEventListener('click', () => {
   speechSynthesis.cancel();
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   vad?.pause();
   currentLineIdx++;
   advanceLine();
@@ -1677,6 +1636,7 @@ document.getElementById('next-line').addEventListener('click', () => {
 
 document.getElementById('repeat-line').addEventListener('click', () => {
   speechSynthesis.cancel();
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   vad?.pause();
   // Find previous spoken (non-mine) line
   let i = currentLineIdx - 1;
@@ -1689,6 +1649,7 @@ document.getElementById('repeat-line').addEventListener('click', () => {
 
 document.getElementById('restart').addEventListener('click', () => {
   speechSynthesis.cancel();
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   vad?.pause();
   currentLineIdx = 0;
   document.querySelectorAll('.rehearsal-line, .stage-direction').forEach(el => {
@@ -1699,6 +1660,7 @@ document.getElementById('restart').addEventListener('click', () => {
 
 document.getElementById('exit-rehearsal').addEventListener('click', () => {
   speechSynthesis.cancel();
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   vad?.pause();
   showStep('step-character');
 });

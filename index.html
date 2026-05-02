@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LineUp — Rehearsal Partner</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f0f17">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LineUp">
+<link rel="apple-touch-icon" href="icon-192.png">
 <script type="importmap">
 {"imports":{"onnxruntime-web":"https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/esm/ort.min.js"}}
 </script>
@@ -526,12 +532,12 @@
   <h2>4. Rehearsal <span id="listening-status"></span></h2>
   <div id="mic-permission" class="alert alert-warning hidden">
     <strong>🎤 Microphone access needed</strong>
-    <p>Tap the button below to enable speech recognition</p>
+    <p>Tap the button below so the app can hear when you finish speaking</p>
     <button onclick="requestMicPermission()" style="margin-top:8px;">Enable Microphone</button>
   </div>
   <div id="no-mic-fallback" class="alert alert-info hidden">
-    <strong>📱 Speech recognition not available</strong>
-    <p>Type your lines instead:</p>
+    <strong>📱 Microphone not available</strong>
+    <p>Type your lines instead, or use the Skip button:</p>
     <div style="display:flex;gap:8px;margin-top:8px;">
       <input type="text" id="text-input" placeholder="Type your line here…" onkeydown="if(event.key==='Enter')submitTextLine()">
       <button onclick="submitTextLine()" style="margin:0;flex-shrink:0;">Submit</button>
@@ -554,7 +560,8 @@ let parsedScript = [];    // [{character, text, isDirection}]
 let characters = [];
 let myCharacter = null;
 let currentLineIdx = 0;
-let recognition = null;
+let vadStream = null;
+let vad = null;
 let voices = [];
 let characterVoiceMap = {};
 
@@ -1180,6 +1187,11 @@ const PIPER_VOICES = [
   { key: 'en-gb-m1', id: 'en_GB-alan-medium',               label: 'GB Male 1',  lang: 'en' },
   { key: 'en-gb-m2', id: 'en_GB-northern_english_male-medium', label: 'GB Male 2', lang: 'en' },
   { key: 'en-gb-m3', id: 'en_GB-aru-medium',               label: 'GB Male 3',   lang: 'en' },
+  // English – Fast (low quality, smaller download)
+  { key: 'en-us-fast-f1', id: 'en_US-lessac-low',           label: 'US Female (fast)', lang: 'en' },
+  { key: 'en-us-fast-m1', id: 'en_US-ryan-low',             label: 'US Male (fast)',   lang: 'en' },
+  { key: 'en-us-fast-m2', id: 'en_US-danny-low',            label: 'US Male 2 (fast)', lang: 'en' },
+  { key: 'en-gb-fast-m1', id: 'en_GB-alan-low',             label: 'GB Male (fast)',   lang: 'en' },
   // Swedish
   { key: 'sv-1',   id: 'sv_SE-nst-medium',              label: 'Swedish',         lang: 'sv' },
   // German – Female
@@ -1326,92 +1338,57 @@ function getVoiceForCharacter(char) {
   return voice;
 }
 
-// ============ Speech recognition (continuous) ============
-let recognitionActive = false;
-let currentLineMatcher = null; // {expected, onMatch} or null when not listening for a line
-let micPermissionGranted = false;
-
-function requestMicPermission() {
-  const micDiv = document.getElementById('mic-permission');
-  const status = document.getElementById('listening-status');
-
-  // Let the speech recognition API trigger its own mic permission dialog.
-  // Calling getUserMedia first and then recognition.start() from a Promise
-  // callback breaks iOS Safari — it requires start() to be called synchronously
-  // from the user gesture that triggered this function.
-  micPermissionGranted = true;
-  if (micDiv) micDiv.classList.add('hidden');
-  recognition = setupRecognition();
-  startContinuousListening();
-  piperPrepareDone.then(() => advanceLine());
-}
-
-function setupRecognition() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    return null;
+// ============ Voice Activity Detection ============
+class VoiceActivityDetector {
+  constructor(stream) {
+    this.ctx = new AudioContext();
+    this.analyser = this.ctx.createAnalyser();
+    this.analyser.fftSize = 512;
+    this.ctx.createMediaStreamSource(stream).connect(this.analyser);
+    this.buf = new Uint8Array(this.analyser.frequencyBinCount);
+    this._raf = null;
   }
-  const r = new SR();
-
-  // Chrome Android does NOT support continuous:true (chromium bug #41297427)
-  // Detect Chrome Android and force continuous=false
-  const isChromeAndroid = /Chrome/.test(navigator.userAgent) && /Android/.test(navigator.userAgent);
-  r.continuous = isChromeAndroid ? false : true;
-  r.interimResults = true;
-
-  const langSelect = document.getElementById('lang-select');
-  r.lang = langSelect ? langSelect.value.split('|')[1] : 'en-US';
-
-  r.onresult = (event) => {
-    if (!currentLineMatcher) return; // not her turn — ignore audio
-    let finalTranscript = '';
-    let interim = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const t = event.results[i][0].transcript;
-      if (event.results[i].isFinal) finalTranscript += ' ' + t;
-      else interim += t;
-    }
-    currentLineMatcher.handle(finalTranscript, interim);
-  };
-
-  r.onerror = (e) => {
-    console.warn('Recognition error', e.error);
-    if (e.error === 'no-speech' || e.error === 'aborted') {
-      // benign — recognition will auto-restart via onend
-    } else if (e.error === 'not-allowed') {
-      alert('Microphone permission denied. Please allow microphone access in Settings > Safari > Microphone (iOS) or browser settings.');
-      recognitionActive = false;
-    } else if (e.error === 'language-not-supported') {
-      console.warn('Language not supported for speech recognition');
-    }
-  };
-
-  r.onend = () => {
-    // Auto-restart so we keep listening across the whole rehearsal
-    // For Chrome Android (continuous:false), we need to manually restart
-    if (recognitionActive) {
-      setTimeout(() => {
-        if (recognitionActive) {
-          try { r.start(); } catch(e) { /* already started */ }
+  getRMS() {
+    this.analyser.getByteTimeDomainData(this.buf);
+    let sum = 0;
+    for (const b of this.buf) { const v = (b - 128) / 128; sum += v * v; }
+    return Math.sqrt(sum / this.buf.length);
+  }
+  listen(onDone) {
+    cancelAnimationFrame(this._raf);
+    const THRESHOLD = 0.015, MIN_SPEECH_MS = 400, SILENCE_MS = 800;
+    let speechAt = null, silenceAt = null;
+    const tick = () => {
+      const loud = this.getRMS() > THRESHOLD, now = Date.now();
+      if (loud) { speechAt = speechAt ?? now; silenceAt = null; }
+      else if (speechAt) {
+        silenceAt = silenceAt ?? now;
+        if (now - silenceAt > SILENCE_MS && now - speechAt > MIN_SPEECH_MS) {
+          this._raf = null;
+          return onDone();
         }
-      }, 100);
-    }
-  };
-
-  return r;
-}
-
-function startContinuousListening() {
-  if (!recognition) return;
-  recognitionActive = true;
-  try { recognition.start(); } catch(e) { /* already running */ }
-}
-
-function stopContinuousListening() {
-  recognitionActive = false;
-  if (recognition) {
-    try { recognition.stop(); } catch(e) {}
+      }
+      this._raf = requestAnimationFrame(tick);
+    };
+    this._raf = requestAnimationFrame(tick);
   }
+  pause() { cancelAnimationFrame(this._raf); this._raf = null; }
+  stop() { this.pause(); this.ctx.close(); }
+}
+
+async function requestMicPermission() {
+  const micDiv = document.getElementById('mic-permission');
+  try {
+    vadStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true }
+    });
+    vad = new VoiceActivityDetector(vadStream);
+  } catch (e) {
+    const noMicFallback = document.getElementById('no-mic-fallback');
+    if (noMicFallback) noMicFallback.classList.remove('hidden');
+  }
+  if (micDiv) micDiv.classList.add('hidden');
+  piperPrepareDone.then(() => advanceLine());
 }
 
 // ============ Rehearsal flow ============
@@ -1434,28 +1411,14 @@ document.getElementById('start-rehearsal').addEventListener('click', () => {
 
   voices = speechSynthesis.getVoices();
 
-  const textMode = document.getElementById('text-mode')?.checked;
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-  if (textMode) {
-    const noMicFallback = document.getElementById('no-mic-fallback');
-    if (noMicFallback) noMicFallback.classList.remove('hidden');
+  if (vad) {
     piperPrepareDone.then(() => advanceLine());
-  } else if (!SR) {
-    console.warn('Speech recognition API not available in this browser');
-    const status = document.getElementById('listening-status');
-    piperPrepareDone.then(() => {
-      if (status) status.textContent = '⚠️ Speech recognition not supported - use Skip button';
-      advanceLine();
-    });
-  } else if (!micPermissionGranted && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    // Show mic button; user must tap it — by then audio will likely be ready
+  } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     const micDiv = document.getElementById('mic-permission');
     if (micDiv) micDiv.classList.remove('hidden');
-    if (micDiv) micDiv.querySelector('button').onclick = () => requestMicPermission();
   } else {
-    recognition = setupRecognition();
-    startContinuousListening();
+    const noMicFallback = document.getElementById('no-mic-fallback');
+    if (noMicFallback) noMicFallback.classList.remove('hidden');
     piperPrepareDone.then(() => advanceLine());
   }
 });
@@ -1465,11 +1428,11 @@ function submitTextLine() {
   const input = document.getElementById('text-input');
   const text = input.value.trim();
   if (!text) return;
-
   const line = parsedScript[currentLineIdx];
-  if (line && line.character === myCharacter && currentLineMatcher) {
-    currentLineMatcher.handle(text, '');
+  if (line && line.character === myCharacter) {
     input.value = '';
+    currentLineIdx++;
+    advanceLine();
   }
 }
 
@@ -1514,8 +1477,7 @@ function highlightLine(idx) {
 function advanceLine() {
   if (currentLineIdx >= parsedScript.length) {
     speechSynthesis.cancel();
-    stopContinuousListening();
-    currentLineMatcher = null;
+    vad?.pause();
     document.getElementById('listening-status').textContent = ' — Done! 🎉';
     return;
   }
@@ -1523,15 +1485,13 @@ function advanceLine() {
   highlightLine(currentLineIdx);
 
   if (line.isDirection) {
-    currentLineMatcher = null;
     speakLine(line.text, null, () => {
       currentLineIdx++;
       advanceLine();
     });
   } else if (line.character === myCharacter) {
-    listenForLine(line.text);
+    listenForLine();
   } else {
-    currentLineMatcher = null;
     speakLine(line.text, line.character, () => {
       currentLineIdx++;
       advanceLine();
@@ -1695,65 +1655,27 @@ function speakLine(text, character, onDone) {
   }, 50);
 }
 
-function listenForLine(expectedText) {
+function listenForLine() {
   document.getElementById('listening-status').innerHTML = ' Listening<span class="listening-indicator"></span>';
-  if (!recognition) {
-    // No speech recognition; user must use Skip button
-    return;
-  }
-
-  const lineEl = document.getElementById('line-' + currentLineIdx);
-  let heardEl = lineEl.querySelector('.heard-text');
-  if (!heardEl) {
-    heardEl = document.createElement('div');
-    heardEl.className = 'heard-text';
-    lineEl.appendChild(heardEl);
-  }
-  heardEl.textContent = '';
-
-  const expected = expectedText.toLowerCase();
-  let accumulatedFinal = '';
-  // Ignore recognition results for a short window after setup — Piper audio
-  // playing through the speaker is picked up by the mic, and those results
-  // arrive here with a small delay even after the audio has finished.
-  const readyAt = Date.now() + 700;
-
-  currentLineMatcher = {
-    handle(finalTranscript, interim) {
-      if (Date.now() < readyAt) return;
-      if (finalTranscript) accumulatedFinal += ' ' + finalTranscript;
-      const display = (accumulatedFinal + ' ' + interim).trim();
-      heardEl.textContent = '🎤 ' + display;
-
-      const wordCount = accumulatedFinal.trim().split(/\s+/).filter(Boolean).length;
-      const expectedWordCount = expected.split(/\s+/).filter(Boolean).length;
-      if (wordCount >= Math.max(2, expectedWordCount * 0.4)) {
-        advanceFromMatcher();
-      }
-    }
-  };
-}
-
-function advanceFromMatcher() {
-  currentLineMatcher = null;
-  setTimeout(() => {
-    currentLineIdx++;
-    advanceLine();
-  }, 400);
+  if (!vad) return; // no mic — user must use Skip button
+  vad.listen(() => {
+    document.getElementById('listening-status').textContent = '';
+    setTimeout(() => { currentLineIdx++; advanceLine(); }, 400);
+  });
 }
 
 
 // ============ Rehearsal controls ============
 document.getElementById('next-line').addEventListener('click', () => {
   speechSynthesis.cancel();
-  currentLineMatcher = null;
+  vad?.pause();
   currentLineIdx++;
   advanceLine();
 });
 
 document.getElementById('repeat-line').addEventListener('click', () => {
   speechSynthesis.cancel();
-  currentLineMatcher = null;
+  vad?.pause();
   // Find previous spoken (non-mine) line
   let i = currentLineIdx - 1;
   while (i >= 0 && (parsedScript[i].isDirection || parsedScript[i].character === myCharacter)) i--;
@@ -1765,7 +1687,7 @@ document.getElementById('repeat-line').addEventListener('click', () => {
 
 document.getElementById('restart').addEventListener('click', () => {
   speechSynthesis.cancel();
-  currentLineMatcher = null;
+  vad?.pause();
   currentLineIdx = 0;
   document.querySelectorAll('.rehearsal-line, .stage-direction').forEach(el => {
     el.classList.remove('done');
@@ -1775,8 +1697,7 @@ document.getElementById('restart').addEventListener('click', () => {
 
 document.getElementById('exit-rehearsal').addEventListener('click', () => {
   speechSynthesis.cancel();
-  stopContinuousListening();
-  currentLineMatcher = null;
+  vad?.pause();
   showStep('step-character');
 });
 
@@ -1807,6 +1728,10 @@ const existingPlays = getSavedPlays();
 if (!existingPlays.find(p => p.name === 'Sample Play')) {
   savePlay('Sample Play', SAMPLE_PLAY);
   renderSavedPlays();
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/lineup/sw.js');
 }
 </script>
 </body>

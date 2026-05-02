@@ -1046,10 +1046,10 @@ function renderCharacterVoiceAssignments() {
     // Gender pills
     const genderPills = document.createElement('div');
     genderPills.style.cssText = 'display:flex;gap:4px;flex-shrink:0;';
-    [['♀', 'female'], ['♂', 'male']].forEach(([icon, g]) => {
+    [['♀', 'female'], ['⊙', 'neutral'], ['♂', 'male']].forEach(([icon, g]) => {
       const pill = document.createElement('span');
       pill.className = 'prop-pill' + (gender === g ? ' active' : '');
-      pill.textContent = icon + ' ' + (g === 'female' ? 'Female' : 'Male');
+      pill.textContent = icon + ' ' + (g === 'female' ? 'Female' : g === 'neutral' ? 'Neutral' : 'Male');
       pill.addEventListener('click', () => {
         const p = typeof piperVoiceAssignments[c] === 'string' ? { gender: null, age: 'adult' } : { ...piperVoiceAssignments[c] };
         p.gender = p.gender === g ? null : g;

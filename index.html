@@ -323,6 +323,7 @@
   .saved-play-date { font-size: 0.8em; color: var(--text-2); margin-top: 2px; }
   .saved-play-actions { display: flex; gap: 6px; flex-shrink: 0; }
   .saved-play-actions button { margin: 0; }
+  .dl-status { font-size: 0.8em; color: var(--text-2); min-width: 2.5em; text-align: right; flex-shrink: 0; }
 
   /* ── Voice assignment rows ── */
   .voice-row {
@@ -514,9 +515,6 @@
       <button onclick="initSpeech()" style="margin-top:8px;">🎤 Initialize Speech Engine</button>
       <span id="voice-status" style="margin-left:10px;font-size:0.85em;color:var(--text-2);"></span>
     </div>
-    <label style="display:flex;margin-bottom:10px;">
-      <input type="checkbox" id="strict-mode"> Strict matching (must say line correctly)
-    </label>
     <div id="piper-status" style="font-size:0.85em;color:var(--text-2);"></div>
   </div>
   <button id="start-rehearsal" disabled>Start rehearsing →</button>
@@ -1020,7 +1018,7 @@ function renderCharacterVoiceAssignments() {
       availableVoices.forEach(v => {
         const opt = document.createElement('option');
         opt.value = v.key;
-        opt.textContent = v.label + (piperDownloaded.has(v.id) ? ' ✓' : '');
+        opt.textContent = v.label;
         if (piperVoiceAssignments[c] === v.key) opt.selected = true;
         sel.appendChild(opt);
       });
@@ -1030,6 +1028,12 @@ function renderCharacterVoiceAssignments() {
         initPiper();
       };
       row.appendChild(sel);
+      const dlSpan = document.createElement('span');
+      dlSpan.className = 'dl-status';
+      dlSpan.id = `dl-${c}`;
+      const currentVoiceDef = getPiperVoiceByKey(piperVoiceAssignments[c]);
+      dlSpan.textContent = piperDownloaded.has(currentVoiceDef.id) ? '✓' : '';
+      row.appendChild(dlSpan);
       container.appendChild(row);
     });
   } else {
@@ -1242,45 +1246,53 @@ async function downloadPiperVoice(modelId, onProgress) {
 }
 
 async function initPiper() {
-  const statusEl = document.getElementById('piper-status');
   const startBtn = document.getElementById('start-rehearsal');
-
-  // Collect unique model IDs needed for the assigned voices
   const others = characters.filter(c => c !== myCharacter);
   const assignedKeys = others.length > 0
     ? others.map(c => piperVoiceAssignments[c] || getDefaultPiperKey())
     : [getDefaultPiperKey()];
   const neededModelIds = new Set(assignedKeys.map(k => getPiperVoiceByKey(k).id));
 
+  // Characters that use a given model ID
+  const charsFor = (modelId) => others.filter(c =>
+    getPiperVoiceByKey(piperVoiceAssignments[c] || getDefaultPiperKey()).id === modelId
+  );
+  const setDlStatus = (modelId, text) =>
+    charsFor(modelId).forEach(c => {
+      const el = document.getElementById(`dl-${c}`);
+      if (el) el.textContent = text;
+    });
+
+  // Mark already-downloaded models immediately
+  for (const modelId of neededModelIds) {
+    if (piperDownloaded.has(modelId)) setDlStatus(modelId, '✓');
+  }
+
   const toDownload = [...neededModelIds].filter(id => !piperDownloaded.has(id));
 
   if (toDownload.length === 0) {
     piperReady = true;
-    if (statusEl) statusEl.textContent = '✓ Ready';
     return;
   }
 
-  // Disable start button while downloading so rehearsal can't start mid-download
   if (startBtn && myCharacter) startBtn.disabled = true;
 
   for (const modelId of toDownload) {
-    const voice = PIPER_VOICES.find(v => v.id === modelId);
-    const label = voice?.label || modelId;
     try {
       await downloadPiperVoice(modelId, (p) => {
         const pct = Math.round(p.loaded * 100 / p.total);
-        if (statusEl) statusEl.textContent = `Downloading ${label}: ${pct}%`;
+        setDlStatus(modelId, `${pct}%`);
       });
+      setDlStatus(modelId, '✓');
     } catch (e) {
       console.error('Piper download failed:', modelId, e);
-      if (statusEl) statusEl.textContent = `Download failed — check your connection`;
+      setDlStatus(modelId, '⚠️');
       if (startBtn && myCharacter) startBtn.disabled = false;
       return;
     }
   }
 
   piperReady = true;
-  if (statusEl) statusEl.textContent = '✓ Ready';
   if (startBtn && myCharacter) startBtn.disabled = false;
 }
 
@@ -1699,28 +1711,24 @@ function listenForLine(expectedText) {
   }
   heardEl.textContent = '';
 
-  const strict = document.getElementById('strict-mode').checked;
   const expected = expectedText.toLowerCase();
   let accumulatedFinal = '';
+  // Ignore recognition results for a short window after setup — Piper audio
+  // playing through the speaker is picked up by the mic, and those results
+  // arrive here with a small delay even after the audio has finished.
+  const readyAt = Date.now() + 700;
 
   currentLineMatcher = {
     handle(finalTranscript, interim) {
+      if (Date.now() < readyAt) return;
       if (finalTranscript) accumulatedFinal += ' ' + finalTranscript;
       const display = (accumulatedFinal + ' ' + interim).trim();
       heardEl.textContent = '🎤 ' + display;
 
-      const heard = display.toLowerCase();
-
-      if (strict) {
-        if (matchScore(heard, expected) > 0.7) {
-          advanceFromMatcher();
-        }
-      } else {
-        const wordCount = accumulatedFinal.trim().split(/\s+/).filter(Boolean).length;
-        const expectedWordCount = expected.split(/\s+/).filter(Boolean).length;
-        if (wordCount >= Math.max(2, expectedWordCount * 0.4)) {
-          advanceFromMatcher();
-        }
+      const wordCount = accumulatedFinal.trim().split(/\s+/).filter(Boolean).length;
+      const expectedWordCount = expected.split(/\s+/).filter(Boolean).length;
+      if (wordCount >= Math.max(2, expectedWordCount * 0.4)) {
+        advanceFromMatcher();
       }
     }
   };
@@ -1734,15 +1742,6 @@ function advanceFromMatcher() {
   }, 400);
 }
 
-function matchScore(heard, expected) {
-  // Simple word-overlap score
-  const heardWords = new Set(heard.replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean));
-  const expectedWords = expected.replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean);
-  if (expectedWords.length === 0) return 1;
-  let matched = 0;
-  expectedWords.forEach(w => { if (heardWords.has(w)) matched++; });
-  return matched / expectedWords.length;
-}
 
 // ============ Rehearsal controls ============
 document.getElementById('next-line').addEventListener('click', () => {

@@ -420,6 +420,36 @@
   }
 
   .hidden { display: none !important; }
+
+  /* ── Generation progress ── */
+  .gen-progress-bar {
+    height: 6px;
+    background: var(--surface-3);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 6px;
+  }
+  .gen-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.2s;
+  }
+
+  /* ── Role selector in rehearsal ── */
+  .role-selector {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+  }
+  .role-selector-label {
+    font-size: 0.82em;
+    color: var(--text-2);
+    margin-bottom: 8px;
+    letter-spacing: 0.3px;
+  }
 </style>
 </head>
 <body>
@@ -514,14 +544,11 @@
   <button id="back-to-input" class="secondary">← Back</button>
 </div>
 
-<!-- STEP 3: Pick character -->
+<!-- STEP 3: Assign voices & generate -->
 <div class="step hidden" id="step-character">
-  <h2>3. Which character(s) do you play?</h2>
-  <p style="color:var(--text-2);font-size:0.9em;margin:0 0 12px;">Tap to select. Pick 0 to just listen.</p>
-  <div class="character-list" id="character-list"></div>
+  <h2>3. Voices</h2>
 
-  <div id="voice-assignments" style="margin-top:20px;display:none;">
-    <h3 style="font-size:0.95em;margin:0 0 8px;color:var(--text-2);">Voice assignments:</h3>
+  <div id="voice-assignments">
     <div id="character-voices"></div>
   </div>
 
@@ -534,13 +561,26 @@
     </div>
     <div id="piper-status" style="font-size:0.85em;color:var(--text-2);"></div>
   </div>
-  <button id="start-rehearsal">Start rehearsing →</button>
-  <button id="back-to-edit" class="secondary">← Back</button>
+
+  <div id="generation-progress" class="hidden" style="margin-top:14px;">
+    <div id="gen-status" style="font-size:0.88em;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+    <div class="gen-progress-bar"><div id="gen-progress-fill" class="gen-progress-fill" style="width:0%"></div></div>
+  </div>
+
+  <div style="margin-top:16px;">
+    <button id="generate-audio-btn">Generate →</button>
+    <button id="start-rehearsal" class="hidden">Start practicing →</button>
+    <button id="back-to-edit" class="secondary">← Back</button>
+  </div>
 </div>
 
 <!-- STEP 4: Rehearse -->
 <div class="step hidden" id="step-rehearse">
   <h2>4. Rehearsal <span id="listening-status"></span></h2>
+  <div class="role-selector">
+    <div class="role-selector-label">You are playing:</div>
+    <div class="character-list" id="rehearse-character-list"></div>
+  </div>
   <div id="mic-permission" class="alert alert-warning hidden">
     <strong>🎤 Microphone access needed</strong>
     <p>Tap the button below so the app can hear when you finish speaking</p>
@@ -665,8 +705,9 @@ function quickStartPlay(name) {
   else if (play.myCharacter) myCharacters = new Set([play.myCharacter]); // backwards compat
   parsedScript = parseScript(play.scriptText);
   characters = [...new Set(parsedScript.filter(l => !l.isDirection).map(l => l.character))];
-  renderCharacterList();
+  renderCharacterVoiceAssignments();
   populateVoices();
+  resetGenerateState();
   showStep('step-character');
   initPiper();
 }
@@ -911,8 +952,9 @@ document.getElementById('parse-script').addEventListener('click', () => {
   characterVoiceAssignments = {};
   piperVoiceAssignments = {};
   myCharacters = new Set();
-  renderCharacterList();
+  renderCharacterVoiceAssignments();
   populateVoices();
+  resetGenerateState();
   showStep('step-character');
   initPiper();
 });
@@ -988,8 +1030,9 @@ function parseScript(text) {
   return lines.filter(l => l.isDirection || l.text);
 }
 
-function renderCharacterList() {
-  const container = document.getElementById('character-list');
+function renderRehearsalCharacterList() {
+  const container = document.getElementById('rehearse-character-list');
+  if (!container) return;
   container.innerHTML = '';
   characters.forEach(c => {
     const chip = document.createElement('div');
@@ -1003,13 +1046,11 @@ function renderCharacterList() {
         myCharacters.add(c);
         chip.classList.add('selected');
       }
-      renderCharacterVoiceAssignments();
-      initPiper();
+      renderScriptDisplay();
+      highlightLine(currentLineIdx);
     });
     container.appendChild(chip);
   });
-  renderCharacterVoiceAssignments();
-  initPiper();
 }
 
 function renderCharacterVoiceAssignments() {
@@ -1017,15 +1058,14 @@ function renderCharacterVoiceAssignments() {
   const parentDiv = document.getElementById('voice-assignments');
   if (!container || !parentDiv) return;
 
-  const others = characters.filter(c => !myCharacters.has(c));
-  if (others.length === 0) {
+  if (characters.length === 0) {
     parentDiv.style.display = 'none';
     return;
   }
   parentDiv.style.display = 'block';
   container.innerHTML = '';
 
-  others.forEach(c => {
+  characters.forEach(c => {
     // Ensure prefs object exists with adult default
     if (!piperVoiceAssignments[c] || typeof piperVoiceAssignments[c] === 'string') {
       const legacy = typeof piperVoiceAssignments[c] === 'string' ? piperVoiceAssignments[c] : null;
@@ -1057,6 +1097,7 @@ function renderCharacterVoiceAssignments() {
         piperReady = false;
         _scriptHash = null;
         renderCharacterVoiceAssignments();
+        resetGenerateState();
         initPiper();
       });
       genderPills.appendChild(pill);
@@ -1081,6 +1122,7 @@ function renderCharacterVoiceAssignments() {
         piperReady = false;
         _scriptHash = null;
         renderCharacterVoiceAssignments();
+        resetGenerateState();
         initPiper();
       });
       agePills.appendChild(pill);
@@ -1348,18 +1390,17 @@ async function downloadPiperVoice(modelId, onProgress) {
 }
 
 async function initPiper() {
-  const startBtn = document.getElementById('start-rehearsal');
-  const others = characters.filter(c => !myCharacters.has(c));
+  const generateBtn = document.getElementById('generate-audio-btn');
 
-  if (others.length === 0) {
-    piperReady = true; // user plays every role — no TTS needed
+  if (characters.length === 0) {
+    piperReady = true;
     return;
   }
 
-  const assignedKeys = others.map(c => resolveVoiceKey(c));
+  const assignedKeys = characters.map(c => resolveVoiceKey(c));
   const neededModelIds = new Set(assignedKeys.map(k => getPiperVoiceByKey(k).id));
 
-  const charsFor = (modelId) => others.filter(c =>
+  const charsFor = (modelId) => characters.filter(c =>
     getPiperVoiceByKey(resolveVoiceKey(c)).id === modelId
   );
   const setDlStatus = (modelId, text) =>
@@ -1379,7 +1420,7 @@ async function initPiper() {
     return;
   }
 
-  if (startBtn) startBtn.disabled = true;
+  if (generateBtn) generateBtn.disabled = true;
 
   for (const modelId of toDownload) {
     try {
@@ -1391,21 +1432,22 @@ async function initPiper() {
     } catch (e) {
       console.error('Piper download failed:', modelId, e);
       setDlStatus(modelId, '⚠️');
-      if (startBtn) startBtn.disabled = false;
+      if (generateBtn) generateBtn.disabled = false;
       return;
     }
   }
 
   piperReady = true;
-  if (startBtn) startBtn.disabled = false;
+  if (generateBtn) generateBtn.disabled = false;
 }
 
 // Re-render voice dropdowns when script language changes
 document.getElementById('lang-select').addEventListener('change', () => {
   piperVoiceAssignments = {};
   _scriptHash = null;
-  renderCharacterVoiceAssignments();
   piperReady = false;
+  renderCharacterVoiceAssignments();
+  resetGenerateState();
   initPiper();
 });
 
@@ -1489,14 +1531,55 @@ async function requestMicPermission() {
 }
 
 // ============ Rehearsal flow ============
-document.getElementById('start-rehearsal').addEventListener('click', async () => {
+function resetGenerateState() {
+  const generateBtn = document.getElementById('generate-audio-btn');
+  const startBtn = document.getElementById('start-rehearsal');
+  const progressDiv = document.getElementById('generation-progress');
+  if (generateBtn) { generateBtn.classList.remove('hidden'); generateBtn.disabled = false; }
+  if (startBtn) startBtn.classList.add('hidden');
+  if (progressDiv) progressDiv.classList.add('hidden');
+  piperCache.clear();
+  piperQueue = Promise.resolve(); // detach any in-flight generation
+}
+
+document.getElementById('generate-audio-btn').addEventListener('click', async () => {
+  const generateBtn = document.getElementById('generate-audio-btn');
+  const startBtn = document.getElementById('start-rehearsal');
+  const progressDiv = document.getElementById('generation-progress');
+  const statusEl = document.getElementById('gen-status');
+  const progressFill = document.getElementById('gen-progress-fill');
+
+  generateBtn.disabled = true;
+  progressDiv.classList.remove('hidden');
+  statusEl.textContent = 'Starting…';
+  progressFill.style.width = '0%';
+
+  _scriptHash = null;
+  const toGenerate = parsedScript.map((l, i) => i).filter(i => !parsedScript[i].isDirection);
+  const total = toGenerate.length;
+  let done = 0;
+
+  for (const idx of toGenerate) {
+    const line = parsedScript[idx];
+    const preview = line.text.length > 38 ? line.text.slice(0, 38) + '…' : line.text;
+    statusEl.textContent = `${line.character}: ${preview}`;
+    await piperPredict(idx);
+    done++;
+    progressFill.style.width = `${Math.round(done * 100 / total)}%`;
+  }
+
+  statusEl.textContent = 'Ready!';
+  setTimeout(() => {
+    progressDiv.classList.add('hidden');
+    generateBtn.classList.add('hidden');
+    startBtn.classList.remove('hidden');
+  }, 500);
+});
+
+document.getElementById('start-rehearsal').addEventListener('click', () => {
   currentLineIdx = 0;
   characterVoiceMap = {};
-  piperCache.clear();
-  piperQueue = Promise.resolve(); // discard any pending background generations
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-  renderScriptDisplay();
-  showStep('step-rehearse');
 
   // Must be synchronous before any await for iOS audio unlock
   new Audio().play().catch(() => {});
@@ -1509,7 +1592,9 @@ document.getElementById('start-rehearsal').addEventListener('click', async () =>
 
   voices = speechSynthesis.getVoices();
 
-  await prepareAllPiperAudio();
+  renderRehearsalCharacterList();
+  renderScriptDisplay();
+  showStep('step-rehearse');
 
   if (vad) {
     advanceLine();
@@ -1627,38 +1712,19 @@ function piperPredict(lineIdx) {
   return p;
 }
 
-// While current line plays, pre-generate the next few non-user lines.
+// While current line plays, pre-generate the next few lines not yet in memory cache.
 function prefetchUpcomingLines(fromIdx) {
   if (!piperReady) return;
   let count = 0;
   for (let i = fromIdx + 1; i < parsedScript.length && count < 3; i++) {
     const line = parsedScript[i];
-    if (!line.isDirection && !myCharacters.has(line.character) && !piperCache.has(i)) {
+    if (!line.isDirection && !piperCache.has(i)) {
       piperPredict(i);
       count++;
     }
   }
 }
 
-// Generate all non-user lines before rehearsal starts.
-// IDB hits are instant on repeat runs; WASM generation only happens on first run.
-async function prepareAllPiperAudio() {
-  _scriptHash = null; // recompute hash for current script + voice config
-  const statusEl = document.getElementById('listening-status');
-  const toGenerate = parsedScript
-    .map((l, i) => i)
-    .filter(i => !myCharacters.has(parsedScript[i].character));
-  const total = toGenerate.length;
-  if (total === 0) return;
-  let done = 0;
-  statusEl.textContent = `⏳ Preparing voices… (0 / ${total})`;
-  for (const idx of toGenerate) {
-    await piperPredict(idx);
-    done++;
-    statusEl.textContent = `⏳ Preparing voices… (${done} / ${total})`;
-  }
-  statusEl.textContent = '';
-}
 
 function speakLine(text, character, onDone) {
   const usePiper = true;

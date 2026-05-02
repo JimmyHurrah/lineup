@@ -1528,18 +1528,57 @@ function advanceLine() {
 }
 
 async function prepareAllPiperAudio() {
-  if (!true || !piperReady) return;
+  if (!piperReady) return;
   const lines = parsedScript
     .map((line, i) => ({ line, i }))
     .filter(({ line }) => line.isDirection || line.character !== myCharacter);
   if (lines.length === 0) return;
+
   const statusEl = document.getElementById('listening-status');
   let done = 0;
   statusEl.textContent = `⏳ Preparing voices… 0 / ${lines.length}`;
-  for (const { i } of lines) {
-    try { await piperPredict(i); } catch (e) { console.error('Prefetch failed line', i, e); }
-    statusEl.textContent = `⏳ Preparing voices… ${++done} / ${lines.length}`;
+
+  const lib = await getPiperLib();
+
+  // Group lines by voice model so we can run each group sequentially
+  // but all groups in parallel (different models don't share ORT sessions)
+  const lineVoiceId = (line) => {
+    const key = line.character
+      ? (piperVoiceAssignments[line.character] || getDefaultPiperKey())
+      : getDefaultPiperKey();
+    return getPiperVoiceByKey(key).id;
+  };
+
+  const groups = new Map(); // voiceId -> [{line, i}]
+  for (const item of lines) {
+    const vid = lineVoiceId(item.line);
+    if (!groups.has(vid)) groups.set(vid, []);
+    groups.get(vid).push(item);
   }
+
+  // Create one TtsSession per unique voiceId — reset the singleton between
+  // each so we get independent session objects with their own ORT sessions
+  const sessions = new Map();
+  for (const voiceId of groups.keys()) {
+    lib.TtsSession._instance = null;
+    sessions.set(voiceId, new lib.TtsSession({ voiceId }));
+  }
+  lib.TtsSession._instance = null;
+
+  // Run each group sequentially; all groups concurrently
+  await Promise.all([...groups.entries()].map(async ([voiceId, groupLines]) => {
+    const session = sessions.get(voiceId);
+    for (const { line, i } of groupLines) {
+      try {
+        const blob = await session.predict(line.text);
+        piperCache.set(i, Promise.resolve(blob));
+      } catch (e) {
+        console.error('Prefetch failed line', i, e);
+      }
+      statusEl.textContent = `⏳ Preparing voices… ${++done} / ${lines.length}`;
+    }
+  }));
+
   statusEl.textContent = '';
 }
 

@@ -1055,6 +1055,7 @@ function renderCharacterVoiceAssignments() {
         p.gender = p.gender === g ? null : g;
         piperVoiceAssignments[c] = p;
         piperReady = false;
+        _scriptHash = null;
         renderCharacterVoiceAssignments();
         initPiper();
       });
@@ -1078,6 +1079,7 @@ function renderCharacterVoiceAssignments() {
         p.age = p.age === a ? null : a;
         piperVoiceAssignments[c] = p;
         piperReady = false;
+        _scriptHash = null;
         renderCharacterVoiceAssignments();
         initPiper();
       });
@@ -1244,6 +1246,55 @@ const PIPER_VOICES = [
 
 let piperReady = false;
 const piperDownloaded = new Set(); // tracks downloaded model IDs
+let _scriptHash = null;
+let _audioDB = null;
+
+function hashString(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h) ^ str.charCodeAt(i);
+  return (h >>> 0).toString(36);
+}
+
+function getScriptHash() {
+  if (!_scriptHash) {
+    const content = parsedScript.map(l => (l.character || '') + ':' + l.text).join('|');
+    _scriptHash = hashString(content + JSON.stringify(piperVoiceAssignments));
+  }
+  return _scriptHash;
+}
+
+async function openAudioDB() {
+  if (_audioDB) return _audioDB;
+  return new Promise((res, rej) => {
+    const req = indexedDB.open('lineup-audio', 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore('blobs');
+    req.onsuccess = e => { _audioDB = e.target.result; res(_audioDB); };
+    req.onerror = () => rej(req.error);
+  });
+}
+
+async function getAudioBlob(key) {
+  try {
+    const db = await openAudioDB();
+    return new Promise(res => {
+      const req = db.transaction('blobs', 'readonly').objectStore('blobs').get(key);
+      req.onsuccess = () => res(req.result || null);
+      req.onerror = () => res(null);
+    });
+  } catch { return null; }
+}
+
+async function putAudioBlob(key, blob) {
+  try {
+    const db = await openAudioDB();
+    return new Promise(res => {
+      const tx = db.transaction('blobs', 'readwrite');
+      tx.objectStore('blobs').put(blob, key);
+      tx.oncomplete = res;
+      tx.onerror = res;
+    });
+  } catch { /* silently fail */ }
+}
 
 function getScriptLangPrefix() {
   const langSelect = document.getElementById('lang-select');
@@ -1352,6 +1403,7 @@ async function initPiper() {
 // Re-render voice dropdowns when script language changes
 document.getElementById('lang-select').addEventListener('change', () => {
   piperVoiceAssignments = {};
+  _scriptHash = null;
   renderCharacterVoiceAssignments();
   piperReady = false;
   initPiper();
@@ -1437,7 +1489,7 @@ async function requestMicPermission() {
 }
 
 // ============ Rehearsal flow ============
-document.getElementById('start-rehearsal').addEventListener('click', () => {
+document.getElementById('start-rehearsal').addEventListener('click', async () => {
   currentLineIdx = 0;
   characterVoiceMap = {};
   piperCache.clear();
@@ -1446,10 +1498,9 @@ document.getElementById('start-rehearsal').addEventListener('click', () => {
   renderScriptDisplay();
   showStep('step-rehearse');
 
-  // Unlock HTMLAudioElement autoplay on iOS (must be synchronous in user gesture)
+  // Must be synchronous before any await for iOS audio unlock
   new Audio().play().catch(() => {});
 
-  // Warm up speech synthesis so the first real line doesn't get swallowed
   try {
     const warmup = new SpeechSynthesisUtterance(' ');
     warmup.volume = 0;
@@ -1457,6 +1508,8 @@ document.getElementById('start-rehearsal').addEventListener('click', () => {
   } catch(e) {}
 
   voices = speechSynthesis.getVoices();
+
+  await prepareAllPiperAudio();
 
   if (vad) {
     advanceLine();
@@ -1549,6 +1602,7 @@ function advanceLine() {
 
 // Generate (or return cached) audio blob. All calls are serialised through
 // piperQueue so only one WASM inference runs at a time (avoids _instance races).
+// Checks IndexedDB first so repeated rehearsals of the same script are instant.
 function piperPredict(lineIdx) {
   if (piperCache.has(lineIdx)) return piperCache.get(lineIdx);
   const line = parsedScript[lineIdx];
@@ -1557,11 +1611,17 @@ function piperPredict(lineIdx) {
   const fallbackKey = langPool.find(v => !v.fast)?.key || langPool[0]?.key;
   const voiceKey = line.character ? resolveVoiceKey(line.character) : fallbackKey;
   const voiceDef = getPiperVoiceByKey(voiceKey);
-  const p = piperQueue = piperQueue.then(() => getPiperLib()).then(lib => {
+  const dbKey = getScriptHash() + '_' + lineIdx;
+  const p = piperQueue = piperQueue.then(async () => {
+    const cached = await getAudioBlob(dbKey);
+    if (cached) return cached;
+    const lib = await getPiperLib();
     if (lib.TtsSession._instance && lib.TtsSession._instance.voiceId !== voiceDef.id) {
       lib.TtsSession._instance = null;
     }
-    return lib.predict({ voiceId: voiceDef.id, text: line.text });
+    const blob = await lib.predict({ voiceId: voiceDef.id, text: line.text });
+    if (blob) putAudioBlob(dbKey, blob);
+    return blob;
   });
   piperCache.set(lineIdx, p);
   return p;
@@ -1578,6 +1638,26 @@ function prefetchUpcomingLines(fromIdx) {
       count++;
     }
   }
+}
+
+// Generate all non-user lines before rehearsal starts.
+// IDB hits are instant on repeat runs; WASM generation only happens on first run.
+async function prepareAllPiperAudio() {
+  _scriptHash = null; // recompute hash for current script + voice config
+  const statusEl = document.getElementById('listening-status');
+  const toGenerate = parsedScript
+    .map((l, i) => i)
+    .filter(i => !myCharacters.has(parsedScript[i].character));
+  const total = toGenerate.length;
+  if (total === 0) return;
+  let done = 0;
+  statusEl.textContent = `⏳ Preparing voices… (0 / ${total})`;
+  for (const idx of toGenerate) {
+    await piperPredict(idx);
+    done++;
+    statusEl.textContent = `⏳ Preparing voices… (${done} / ${total})`;
+  }
+  statusEl.textContent = '';
 }
 
 function speakLine(text, character, onDone) {

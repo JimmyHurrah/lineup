@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-title" content="LineUp">
 <link rel="apple-touch-icon" href="icon-192.png">
 <script type="importmap">
-{"imports":{"onnxruntime-web":"https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/esm/ort.min.js"}}
+{"imports":{"onnxruntime-web":"https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/esm/ort.wasm-core.min.js"}}
 </script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
@@ -1761,9 +1761,9 @@ function speakLine(text, character, onDone) {
       });
       prefetchUpcomingLines(lineIdx);
     }).catch(e => {
-      console.error('Piper error:', e);
-      statusEl.textContent = '⚠️ Piper error: ' + (e.message || e);
-      if (onDone) onDone();
+      console.error('Piper error — falling back to SpeechSynthesis:', e);
+      piperReady = false; // stop trying piper for this session
+      speakLine(text, character, onDone); // retry via SpeechSynthesis fallback
     });
     return;
   }

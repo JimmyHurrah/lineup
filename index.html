@@ -1356,6 +1356,8 @@ class VoiceActivityDetector {
   }
   listen(onDone) {
     cancelAnimationFrame(this._raf);
+    // iOS Safari suspends AudioContext after audio playback; resume before listening
+    if (this.ctx.state === 'suspended') this.ctx.resume();
     const THRESHOLD = 0.015, MIN_SPEECH_MS = 400, SILENCE_MS = 800;
     let speechAt = null, silenceAt = null;
     const tick = () => {
